@@ -33,9 +33,9 @@ import { player, session, L, C } from './panel-context.js';
         ctx.fillText('\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500',cx,ty);
         ty+=U(12);
         const COMP_KEYS=DMG.COMPS;
-        const COMP_LABELS=['TORP RM','CONTROL','AUX MCH',C.player.isDiesel?'ENG CM':'REACTOR',C.player.isDiesel?'MOTOR RM':'MANEUVR','ENGINRG'];
-        const colW=(W*0.7)/6; const colStartX=cx-W*0.35+colW/2;
-        for(let ci=0;ci<6;ci++){
+        const COMP_LABELS=DMG.COMP_LABELS;
+        const colW=(W*0.7)/COMP_KEYS.length; const colStartX=cx-W*0.35+colW/2;
+        for(let ci=0;ci<COMP_KEYS.length;ci++){
           const comp=COMP_KEYS[ci]; const list=dmg.crew[comp]||[];
           const cfit=list.filter(c=>c.status==='fit').length; const ckia=list.filter(c=>c.status==='killed').length;
           const cx2=colStartX+ci*colW;

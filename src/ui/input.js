@@ -117,6 +117,8 @@ addEventListener("mousemove", (e) => {
 });
 
 addEventListener("mousedown", (e) => {
+  // Skip canvas button handling if the click target is inside the dev panel or other DOM UI
+  if (e.target.closest('#dev-panel')) return;
   updateMouse(e);
   if (e.button === 0) {
     input.mouseDownL = true;

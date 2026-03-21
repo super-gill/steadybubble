@@ -57,8 +57,8 @@ export const CONFIG = {
     torpTubes:4, torpStock:32, torpReloadTime:28, fireDelay:4.5,
     torpArcDeg:55, torpEnableDist:300,
     torpWireMaxRange:3000, torpWireBreakTurnDeg:90,
-    wireMaxLaunchKts:15, wireSafeKts:15, wireStressKts:20,
-    wireStressBreakTime:25, wireInstantBreakKts:22,
+    wireMaxLaunchKts:10, wireSafeKts:10, wireStressKts:15,
+    wireStressBreakTime:15, wireInstantBreakKts:15,
     periscope:      { cd:10.0, dur:4.5, revealR:3600, detectBoost:1.55, noiseSpike:0.10 },
     speedDeafness:  { startKts:4, fullDeafKts:10 },
     launchTransientRange:2000, launchTransientSus:0.35,
@@ -196,6 +196,7 @@ export const CONFIG = {
   weapons: {
     mk48_adcap: {
       kind:'torpedo', label:'MK-48 ADCAP', shortLabel:'ADCAP',
+      role:'Heavyweight torpedo', desc:'Wire-guided heavyweight torpedo with active/passive seeker. Primary anti-submarine and anti-surface weapon for US submarines.',
       speed:50, approachSpeed:18, life:210, dmg:55,
       seekRange:520, seekFOV:0.90, passiveFOV:2.4,
       turnRate:1.55, reacquireChance:0.016, arming:0.30, searchSnake:0.18,
@@ -204,6 +205,7 @@ export const CONFIG = {
     },
     spearfish: {
       kind:'torpedo', label:'SPEARFISH', shortLabel:'SPEARFISH',
+      role:'Heavyweight torpedo', desc:'Royal Navy wire-guided heavyweight torpedo. Fastest NATO torpedo at 70+ knots with superior ECCM and hard-kill capability.',
       speed:70, approachSpeed:20, life:280, dmg:60,
       seekRange:600, seekFOV:0.95, passiveFOV:2.5, turnRate:1.65,
       reacquireChance:0.020, arming:0.28, searchSnake:0.16,
@@ -212,6 +214,7 @@ export const CONFIG = {
     },
     tigerfish: {
       kind:'torpedo', label:'TIGERFISH Mk 24', shortLabel:'TIGERFISH',
+      role:'Heavyweight torpedo', desc:'1970s-era Royal Navy wire-guided torpedo. Reliable but slow at 35 knots. Inferior ECCM makes it susceptible to countermeasures.',
       speed:35, approachSpeed:12, life:300, dmg:45,
       seekRange:340, seekFOV:0.75, passiveFOV:2.1, turnRate:1.25,
       reacquireChance:0.008, arming:0.35, searchSnake:0.22,
@@ -220,6 +223,7 @@ export const CONFIG = {
     },
     sst4: {
       kind:'torpedo', label:'SST-4 / SUT', shortLabel:'SST-4',
+      role:'Heavyweight torpedo', desc:'German wire-guided export torpedo. Moderate speed at 38 knots. Reliable and widely deployed across 14+ navies.',
       speed:38, approachSpeed:13, life:260, dmg:50,
       seekRange:380, seekFOV:0.82, passiveFOV:2.2, turnRate:1.35,
       reacquireChance:0.010, arming:0.32, searchSnake:0.20,
@@ -227,22 +231,58 @@ export const CONFIG = {
       depthRate:2, vertWindow:120, vertFuse:60,
     },
     harpoon: {
-      kind:'missile', label:'UUM-84 HARPOON', shortLabel:'HARPOON',
+      kind:'missile', label:'UGM-84 HARPOON', shortLabel:'HARPOON',
+      role:'Anti-ship missile', desc:'Tube-launched anti-ship cruise missile. Sea-skimming active radar seeker. Launch depth limited to 25m.',
       speed:450, range:25000, seekerFOV:0.698, warheadDmg:85,
       reloadMult:1.5, vls:false, maxLaunchDepth:25,
     },
     sub_harpoon: {
       kind:'missile', label:'UGM-84 SUB-HARPOON', shortLabel:'S-HARPOON',
+      role:'Anti-ship missile', desc:'Royal Navy variant of Harpoon. Tube-launched anti-ship cruise missile with active radar seeker.',
       speed:450, range:25000, seekerFOV:0.698, warheadDmg:85,
       reloadMult:1.5, vls:false, maxLaunchDepth:25,
     },
     tasm: {
-      kind:'missile', label:'BGM-109C TASM', shortLabel:'TASM',
+      kind:'missile', label:'BGM-109B TASM', shortLabel:'TASM',
+      role:'Anti-ship cruise missile', desc:'Tomahawk Anti-Ship Missile. Long-range sea-skimming cruise missile with radar seeker. Tube or VLS launch. Retired ~1994.',
       speed:400, range:999999, seekerFOV:0.611, warheadDmg:120,
-      reloadMult:null, vls:true, maxLaunchDepth:30,
+      reloadMult:1.8, vls:true, tubeLaunch:true, maxLaunchDepth:30,
+    },
+    tlam: {
+      kind:'missile', label:'BGM-109 TLAM', shortLabel:'TLAM',
+      role:'Land-attack cruise missile', desc:'Tomahawk Land-Attack Missile. GPS/INS guided. Strategic strike against land targets. No anti-ship capability.',
+      speed:400, range:999999, seekerFOV:null, warheadDmg:150,
+      reloadMult:1.8, vls:true, tubeLaunch:true, maxLaunchDepth:30,
+      placeholder:true,
+    },
+    subroc: {
+      kind:'missile', label:'UUM-44 SUBROC', shortLabel:'SUBROC',
+      role:'ASW standoff weapon', desc:'Submarine Rocket. Launches from torpedo tube, flies ballistic trajectory, delivers nuclear depth bomb at standoff range. Retired early 1990s.',
+      speed:600, range:55000, seekerFOV:null, warheadDmg:200,
+      reloadMult:1.5, vls:false, tubeLaunch:true, maxLaunchDepth:300,
+      placeholder:true,
+    },
+    mk67_slmm: {
+      kind:'mine', label:'MK-67 SLMM', shortLabel:'SLMM',
+      role:'Mobile mine', desc:'Submarine-Launched Mobile Mine. Propelled mine launched from torpedo tube. Swims to target area and settles on the seabed.',
+      reloadMult:1.0, vls:false, tubeLaunch:true, maxLaunchDepth:60,
+      placeholder:true,
+    },
+    mk60_captor: {
+      kind:'mine', label:'MK-60 CAPTOR', shortLabel:'CAPTOR',
+      role:'Encapsulated torpedo mine', desc:'Encapsulated Torpedo. Bottom mine containing a Mk 46 torpedo. Detects passing submarines and launches the torpedo autonomously.',
+      reloadMult:1.0, vls:false, tubeLaunch:true, maxLaunchDepth:300,
+      placeholder:true,
+    },
+    stonefish: {
+      kind:'mine', label:'STONEFISH MINE', shortLabel:'STONEFISH',
+      role:'Bottom mine', desc:'Royal Navy influence mine. Deployed from torpedo tube. Settles on the seabed and detonates on magnetic/acoustic signature.',
+      reloadMult:1.0, vls:false, tubeLaunch:true, maxLaunchDepth:200,
+      placeholder:true,
     },
     sm39: {
       kind:'missile', label:'SM39 EXOCET', shortLabel:'EXOCET',
+      role:'Anti-ship missile', desc:'Submarine-launched Exocet. Encapsulated missile launched from torpedo tube at up to 55m depth. Short range but can fire deep.',
       speed:370, range:9000, seekerFOV:0.524, warheadDmg:65,
       reloadMult:1.5, vls:false, maxLaunchDepth:55,
     },
@@ -253,3 +293,11 @@ export const CONFIG = {
   visuals:{ screenBubbles:false },
   layout:{ panelH:190, depthStripW:88, uiScaleDefault:1.0 },
 };
+
+// ── Weapon type helper ──────────────────────────────────────────────────
+// Returns true if the weapon key represents a torpedo (not a missile/mine).
+// Handles: null, undefined, 'torp' (legacy), and actual weapon keys.
+export function isTorpLoad(key){
+  if(!key || key==='torp') return true;
+  return (CONFIG.weapons?.[key]?.kind==='torpedo');
+}

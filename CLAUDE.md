@@ -30,13 +30,13 @@ V1 (subgame2) is the behavioral ground truth. V2 (Steady Bubble) must be functio
 
 ## Your Standing Instructions
 
-1. **Read `docs/MIGRATION.md` at the start of every session** before doing anything. It tells you where you are.
-2. **Read `docs/ARCHITECTURE.md` before making any structural decision.** All code must conform to the target architecture.
-3. **Update `docs/MIGRATION.md` at the end of every session.** Mark completed tasks, set the next session's starting point. This is non-negotiable — it is how continuity is maintained across your memory loss between sessions.
-4. **Log decisions in `docs/DECISIONS.md`.** Any technical decision that could be argued either way, or that future-you might question, gets recorded there with rationale.
+1. **Read `docs/vessel-individuality/SESSION-LOG.md` at the start of every session** before doing anything. It tells you what has been done and what's next.
+2. **Read `docs/vessel-individuality/DESIGN.md` for the upgrade design** — implementation patterns, phase structure, open questions.
+3. **Update `docs/vessel-individuality/SESSION-LOG.md` at the end of every session.** Record what was done, problems encountered, and how they were solved. This is non-negotiable — it is how continuity is maintained across your memory loss between sessions.
+4. **Log decisions in `docs/vessel-individuality/DECISIONS.md`.** Any technical decision that could be argued either way, or that future-you might question, gets recorded there with rationale.
 5. **Do not start a phase until the previous phase is confirmed working by Jason.** Playtesting and sign-off between phases is Jason's responsibility.
 6. **Do not modify subgame2 (V1).** It is the reference, not the working copy.
-7. **Do not fix bugs during migration.** If a bug is found in V1 code, port it as-is and log it in `docs/DECISIONS.md` under Known Bugs. Bug fixes are post-migration work. (See D001)
+7. **Read `manual.md` (the constitution)** when working on gameplay mechanics. It is the authoritative reference for all game systems.
 
 ---
 
@@ -71,10 +71,19 @@ V1 (subgame2) is the behavioral ground truth. V2 (Steady Bubble) must be functio
 
 | Thing | Path |
 |---|---|
-| V2 project root | `my-projects/steady-bubble/` |
-| V1 reference | `my-projects/subgame2/` |
-| V2 source | `my-projects/steady-bubble/src/` |
-| V2 docs | `my-projects/steady-bubble/docs/` |
-| Migration status | `my-projects/steady-bubble/docs/MIGRATION.md` |
-| Target architecture | `my-projects/steady-bubble/docs/ARCHITECTURE.md` |
-| Logged decisions | `my-projects/steady-bubble/docs/DECISIONS.md` |
+| Project root | `steadybubble/` |
+| V1 reference | `super-gill.github.io/my-projects/subgame2/` (DO NOT MODIFY) |
+| Source | `steadybubble/src/` |
+| Constitution | `steadybubble/manual.md` |
+| **Active project docs** | `steadybubble/docs/vessel-individuality/` |
+| — Design doc | `docs/vessel-individuality/DESIGN.md` |
+| — Session log | `docs/vessel-individuality/SESSION-LOG.md` |
+| — Decisions (D008+) | `docs/vessel-individuality/DECISIONS.md` |
+| — Layout template | `docs/vessel-individuality/LAYOUT-TEMPLATE.md` |
+| **Planned project** | `steadybubble/docs/weapons-expansion/` |
+| — Design doc | `docs/weapons-expansion/DESIGN.md` |
+| **Archived project** | `steadybubble/docs/migration/` |
+| — Migration status | `docs/migration/MIGRATION.md` (COMPLETE) |
+| — Decisions (D001-D007) | `docs/migration/DECISIONS.md` |
+| — Architecture | `docs/migration/ARCHITECTURE.md` |
+| Global docs | `steadybubble/docs/BUGS.md`, `docs/FEATURE-REQUESTS.md` |

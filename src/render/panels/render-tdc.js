@@ -8,6 +8,7 @@ import {
   L, C, TH,
   getTdcDepthBuf, setTdcDepthBuf, pushTdcDepthBuf,
 } from './panel-context.js';
+import { isTorpLoad } from '../../config/constants.js';
 
 export function drawTdcSection(x, w, pc) {
     const { ctx, U, panelY, pad, btn, panelH } = pc;
@@ -210,11 +211,11 @@ export function drawTdcSection(x, w, pc) {
     {
       const asc=session.ascmSolution;
       const rdY4=panelY+U(138);  // below WEPS solution (rdY3=panelY+U(110) + ~U(28))
-      const hasMissile=(player.missileStock||0)>0||(player.tubeLoad||[]).some(l=>l&&l!=='torp');
+      const hasMissile=(player.missileStock||0)>0||(player.tubeLoad||[]).some(l=>l&&!isTorpLoad(l));
       // True only when a missile is sitting in a ready tube
       const tubeLoad=player.tubeLoad||[];
       const torpTubes=player.torpTubes||[];
-      const hasMissileTubeReady=tubeLoad.some((l,i)=>l&&l!=='torp'&&torpTubes[i]===0);
+      const hasMissileTubeReady=tubeLoad.some((l,i)=>l&&!isTorpLoad(l)&&torpTubes[i]===0);
 
       ctx.font=`${U(9)}px ui-monospace,monospace`;
       ctx.fillStyle='rgba(17,24,39,0.38)';

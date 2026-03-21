@@ -2,7 +2,7 @@
 
 import {
   COMPS, COMP_DEF, ROOMS, ROOM_IDS, SECTION_ROOMS, SECTION_LABEL,
-  SYS_DEF, SYS_LABEL, ROOM_SYSTEMS, ROOM_ADJ, EVAC_TO, SECTION_CAP,
+  SYS_DEF, SYS_LABEL, ROOM_SYSTEMS, ROOM_ADJ, EVAC_TO, SECTION_CAP, WTD_PAIRS,
   STATES,
   FIRE_BASE_GROW, FIRE_SCALE_GROW, WATCH_SUPPRESS, DC_FIRE_SUPPRESS,
   FIRE_EVAC_TIME, FIRE_DETECT_THRESHOLD, FIRE_INVESTIGATE_DELAY,
@@ -124,7 +124,7 @@ function _triggerFireDetection(roomId, section, d){
       _COMMS?.fire.ignited(room.label, COMP_STATION[section]||'ENG');
     }
   }
-  if(section==='reactor_comp'&&!d._reactorFireScram){
+  if((section==='reactor_comp'||section==='reactor')&&!d._reactorFireScram){
     d._reactorFireScram=true;
     if(d.systems.reactor==='nominal'||d.systems.reactor==='degraded') d.systems.reactor='offline';
     if(!player.scram&&typeof triggerScram==='function') triggerScram('damage');
@@ -167,7 +167,7 @@ export function _extinguishFire(roomId, d, by){
       }
     }
   }
-  if(section==='reactor_comp'&&d._reactorFireScram){
+  if((section==='reactor_comp'||section==='reactor')&&d._reactorFireScram){
     d._reactorFireScram=false;
     // Only say "commencing fast recovery" if the reactor system itself wasn't damaged.
     // If damaged, the scram tick in sim.js will fire scramHoldRepair() instead.
@@ -236,7 +236,7 @@ export function _nitrogenDrench(comp, d, dcTeam){
     _COMMS?.fire.ventN2Required(SECTION_LABEL[comp]);
   }
 
-  if(comp==='reactor_comp'){
+  if(comp==='reactor_comp'||comp==='reactor'){
     if(d._reactorFireScram) d._reactorFireScram=false;
     if(!player.scram&&typeof triggerScram==='function'){
       triggerScram('damage');
@@ -310,6 +310,49 @@ function _tickFireInner(dt, d){
       if (!hasDamagedSys) continue;
       if (Math.random() < (_efCfg.unmannedDamagedChancePerSec || 0.0002) * dt) {
         igniteFire(roomId, _efCfg.startIntensity || 0.05);
+      }
+    }
+  }
+
+  // ── False fire alarms — unmanned rooms occasionally trigger sensor alarms ──
+  // ~0.5% chance per unmanned room per minute (very rare but keeps crew on edge)
+  if(!d._falseAlarmT) d._falseAlarmT=0;
+  d._falseAlarmT+=dt;
+  if(d._falseAlarmT>=10.0){ // check every 10 seconds
+    d._falseAlarmT=0;
+    if(!d._fireAlarmFalse) d._fireAlarmFalse={};
+    for(const sec of COMPS){
+      if(d.flooded[sec]||d._fireDrench?.[sec]) continue;
+      const unmannedRooms=(SECTION_ROOMS[sec]||[]).filter(rid=>
+        (ROOMS[rid]?.crew||0)===0 && !(d.fire[rid]>0) && !d._fireAlarmFired?.[rid] && !d._fireAlarmFalse[rid]
+      );
+      for(const rid of unmannedRooms){
+        if(Math.random()<0.008){ // ~0.8% per check per room
+          d._fireAlarmFalse[rid]=true;
+          if(!d._fireDetectT) d._fireDetectT={};
+          d._fireDetectT[rid]=FIRE_INVESTIGATE_DELAY;
+          _COMMS?.fire.fireAlarm(ROOMS[rid].label, COMP_STATION[sec]||'ENG');
+          _alert(`FIRE ALARM — ${ROOMS[rid].label}`);
+        }
+      }
+    }
+  }
+  // Tick false alarm investigations
+  if(d._fireAlarmFalse){
+    for(const rid of Object.keys(d._fireAlarmFalse)){
+      if(!d._fireAlarmFalse[rid]) continue;
+      if(d._fireDetectT?.[rid]!=null){
+        d._fireDetectT[rid]-=dt;
+        if(d._fireDetectT[rid]<=0){
+          // Investigation complete — no fire found
+          delete d._fireAlarmFalse[rid];
+          delete d._fireDetectT[rid];
+          const room=ROOMS[rid];
+          if(room){
+            _COMMS?.fire.falseAlarm(room.label, COMP_STATION[room.section]||'ENG');
+            _alert(`FALSE ALARM — ${room.label}`);
+          }
+        }
       }
     }
   }
@@ -398,16 +441,44 @@ function _tickFireInner(dt, d){
       if(newFire<=0) _extinguishFire(roomId,d,dcTeam?'dc':'watch');
     }
 
-    // ── Intra-section fire spread — compartment to adjacent compartment ──
-    // Fire above 30% can jump to an adjacent compartment within the same section.
-    // Spread chance increases with fire intensity. Only spreads within ROOM_ADJ.
+    // ── System heat damage — runs for ALL burning rooms, detected or not ──
+    // Fire damages equipment regardless of whether crew know about it.
+    // Accumulator-based: guaranteed damage every N seconds of fire above threshold,
+    // not probabilistic (old system could go entire fires without a single hit).
+    if(!d._fireHeatAccum) d._fireHeatAccum={};
+    for(const roomId of roomIds){
+      const roomFire=d.fire[roomId]||0;
+      if(roomFire<=0.15){ delete d._fireHeatAccum[roomId]; continue; }
+      // Accumulate heat damage — rate scales with fire intensity
+      const heatRate=(roomFire-0.15)*0.15; // units/s — at 80% fire: 0.0975/s → damage every ~10s
+      d._fireHeatAccum[roomId]=(d._fireHeatAccum[roomId]||0)+heatRate*dt;
+      if(d._fireHeatAccum[roomId]>=1.0){
+        d._fireHeatAccum[roomId]-=1.0;
+        // Systems in this room (direct heat)
+        let targetSys=(ROOM_SYSTEMS[roomId]||[]).filter(s=>d.systems[s]!=='destroyed');
+        // If no systems in this room, heat radiates to adjacent rooms
+        if(targetSys.length===0){
+          const adjRooms=(ROOM_ADJ[roomId]||[]);
+          targetSys=adjRooms.flatMap(rid=>(ROOM_SYSTEMS[rid]||[])).filter(s=>d.systems[s]!=='destroyed');
+        }
+        if(targetSys.length>0){
+          const sys=targetSys[Math.floor(Math.random()*targetSys.length)];
+          const newState=damageSystem(sys,1);
+          _COMMS?.fire.heatDamage(SYS_LABEL[sys],newState,SECTION_LABEL[section]);
+          _alert(`HEAT DAMAGE — ${SYS_LABEL[sys]}`);
+        }
+      }
+    }
+
+    // ── Intra-section fire spread — room to adjacent room within same WTS ──
+    // Fire above 20% can jump to an adjacent room. Spread chance scales with intensity.
     for(const roomId of roomIds){
       const fire=d.fire[roomId]||0;
-      if(fire<0.30) continue;
+      if(fire<0.20) continue;
       for(const adjId of (ROOM_ADJ[roomId]||[])){
         if((d.fire[adjId]||0)>0.01) continue; // already burning
-        const spreadChance=(fire-0.30)*0.004*dt;
-        if(Math.random()<spreadChance) igniteFire(adjId, 0.03);
+        const spreadChance=(fire-0.20)*0.012*dt; // ~3x more likely to spread (was 0.004)
+        if(Math.random()<spreadChance) igniteFire(adjId, 0.05);
       }
     }
 
@@ -452,22 +523,6 @@ function _tickFireInner(dt, d){
       }
       d._fireWatch[section]={ count:0,t:0,lastCasCheck:0,_outOfControlFired:watch?._outOfControlFired||false };
       _COMMS?.fire.dcRelief(SECTION_LABEL[section]);
-    }
-
-    // System heat damage — per-room: only systems in burning rooms take heat
-    for(const roomId of roomIds){
-      const roomFire=d.fire[roomId]||0;
-      if(roomFire<=0.30) continue;
-      const heatChance=(roomFire-0.30)*0.002*dt;
-      if(Math.random()<heatChance){
-        const roomSys=(ROOM_SYSTEMS[roomId]||[]).filter(s=>d.systems[s]!=='destroyed');
-        if(roomSys.length>0){
-          const sys=roomSys[Math.floor(Math.random()*roomSys.length)];
-          const newState=damageSystem(sys,1);
-          _COMMS?.fire.heatDamage(SYS_LABEL[sys],newState,SECTION_LABEL[section]);
-          _alert(`HEAT DAMAGE — ${SYS_LABEL[sys]}`);
-        }
-      }
     }
 
     // Out of control
@@ -525,25 +580,42 @@ function _tickFireInner(dt, d){
       }
     }
 
-    // Cascade to adjacent section — only through open watertight doors
-    if(F>0.85){
-      const cascadeChance=(F-0.85)/0.15*0.012*dt;
-      if(Math.random()<cascadeChance){
-        const adj=EVAC_TO[section]||[];
-        const targetSection=adj.find(s=>{
-          if(_sectionFire(s,d)>=0.05||d.flooded[s]||d._fireDrench?.[s]) return false;
-          // Only cascade through an open WTD
-          const si=COMPS.indexOf(section), ti=COMPS.indexOf(s);
-          const lo=Math.min(si,ti), hi=Math.max(si,ti);
-          const wtdKey=COMPS[lo]+'|'+COMPS[hi];
-          return (d.wtd?.[wtdKey]||'open')==='open';
-        });
-        if(targetSection){
-          const targetRooms=SECTION_ROOMS[targetSection]||[];
+    // ── Watertight bulkhead burn-through ───────────────────────────────────
+    // Fire can ONLY cross a watertight bulkhead if:
+    //   1. At least one room adjacent to the bulkhead is at 100% fire intensity
+    //   2. It stays at 100% for an extended duration (tracked per WTD)
+    //   3. When burn-through occurs, the WTD is damaged (cannot close until repaired)
+    // This replaces the old open-door cascade — fire no longer spreads through open WTDs instantly.
+    if(!d._fireBulkheadT) d._fireBulkheadT={};
+    const BULKHEAD_BURN_TIME=60; // seconds at 100% before burn-through
+    for(const [sA,sB] of WTD_PAIRS){
+      const wtdKey=sA+'|'+sB;
+      // Check if this section is one side of this bulkhead
+      if(section!==sA&&section!==sB) continue;
+      const otherSec=(section===sA)?sB:sA;
+      // Only consider burn-through if the other section isn't already on fire/flooded/drenched
+      if(_sectionFire(otherSec,d)>=0.05||d.flooded[otherSec]||d._fireDrench?.[otherSec]) continue;
+      // Check if any room in this section near the bulkhead is at 100%
+      const atMax=F>=0.98;
+      if(atMax){
+        d._fireBulkheadT[wtdKey]=(d._fireBulkheadT[wtdKey]||0)+dt;
+        // Burn-through after sustained max fire
+        if(d._fireBulkheadT[wtdKey]>=BULKHEAD_BURN_TIME){
+          d._fireBulkheadT[wtdKey]=0;
+          // Damage the WTD system — set to destroyed, force door open
+          const wtdSysBurn=Object.keys(SYS_DEF).find(s=>SYS_DEF[s].isWTD&&SYS_DEF[s].wtdKey===wtdKey);
+          if(wtdSysBurn) d.systems[wtdSysBurn]='destroyed';
+          d.wtd[wtdKey]='open';
+          _COMMS?.fire.cascade(SECTION_LABEL[section],SECTION_LABEL[otherSec]);
+          _alert(`BULKHEAD BURN-THROUGH — ${SECTION_LABEL[section]}`);
+          // Ignite fire in adjacent section
+          const targetRooms=SECTION_ROOMS[otherSec]||[];
           const targetRoom=targetRooms[Math.floor(Math.random()*targetRooms.length)];
-          _COMMS?.fire.cascade(SECTION_LABEL[section],SECTION_LABEL[targetSection]);
-          if(targetRoom) igniteFire(targetRoom,0.05);
+          if(targetRoom) igniteFire(targetRoom,0.10);
         }
+      } else {
+        // Reset timer if fire drops below max
+        if(d._fireBulkheadT[wtdKey]) d._fireBulkheadT[wtdKey]=Math.max(0,d._fireBulkheadT[wtdKey]-dt*0.5);
       }
     }
   }

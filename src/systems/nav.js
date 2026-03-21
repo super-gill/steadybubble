@@ -180,10 +180,10 @@ function stepDynamics(dt){
   const err=orderSigned-currentSigned;
   // Conn room lost — engine orders relayed via internal comms; 4× slower response
   // Flooding adds drag — acceleration degrades with water mass
-  // Scale speedTau with vessel flank speed — tuned for 28kt base; faster boats accelerate proportionally
-  const baseTau = C.player.speedTau || 45;
-  const tauScale = 28 / Math.max(20, C.player.flankKts || 28); // Seawolf 35kt → tau*0.8
-  const speedTauEff = (dmgFx.connRoomLost ? baseTau * tauScale * 4.0 : baseTau * tauScale) * (dmgFx.floodTauMult||1.0);
+  // Per-vessel accel/decel tau: accelerating uses accelTau, decelerating uses decelTau
+  const accelerating = Math.abs(orderSigned) > Math.abs(currentSigned) + 0.5;
+  const baseTau = accelerating ? (C.player.accelTau || 45) : (C.player.decelTau || 30);
+  const speedTauEff = (dmgFx.connRoomLost ? baseTau * 4.0 : baseTau) * (dmgFx.floodTauMult||1.0);
   const newSigned=currentSigned+(err/Math.max(0.05, speedTauEff))*dt;
   player.speed=clamp(Math.abs(newSigned),0,maxKts);
   player._movingDir=player.speed<0.05?orderDir:(newSigned>=0?1:-1);
@@ -506,19 +506,25 @@ function stepDynamics(dt){
   const aftMode = dmgFx.aftPlaneMode || 'hydraulic';
 
   // Detect mode transitions and fire comms once per change
+  // Skip comms during first 2s of mission to avoid init-race false transitions
+  const _initSafe=session.missionT>2.0;
   if(fwdMode !== (pFwd.mode||'hydraulic')){
     const prev = pFwd.mode; pFwd.mode = fwdMode;
-    if(fwdMode==='air_emergency') _COMMS?.planes?.fwdAirEmergency();
-    else if(fwdMode==='frozen')   _COMMS?.planes?.fwdControlLost();
-    if(prev==='air_emergency' && fwdMode==='hydraulic') _COMMS?.planes?.fwdHydraulicRestored();
+    if(_initSafe){
+      if(fwdMode==='air_emergency') _COMMS?.planes?.fwdAirEmergency();
+      else if(fwdMode==='frozen')   _COMMS?.planes?.fwdControlLost();
+      if(prev==='air_emergency' && fwdMode==='hydraulic') _COMMS?.planes?.fwdHydraulicRestored();
+    }
   }
   if(aftMode !== (pAft.mode||'hydraulic')){
     const prev = pAft.mode; pAft.mode = aftMode;
-    if(aftMode==='air_emergency'){
-      const transferred = dmgFx.aftCtrlTransferred;
-      _COMMS?.planes?.aftAirEmergency(transferred);
+    if(_initSafe){
+      if(aftMode==='air_emergency'){
+        const transferred = dmgFx.aftCtrlTransferred;
+        _COMMS?.planes?.aftAirEmergency(transferred);
+      }
+      if(prev==='air_emergency' && aftMode==='hydraulic') _COMMS?.planes?.aftHydraulicRestored();
     }
-    if(prev==='air_emergency' && aftMode==='hydraulic') _COMMS?.planes?.aftHydraulicRestored();
   }
   // Aft control transfer notification (once)
   if(dmgFx.aftCtrlTransferred && !player._aftCtrlTransferNotified){

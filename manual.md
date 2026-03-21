@@ -1,6 +1,6 @@
 Document Title: Standard Operating Procedures — NATO Submarine Operations
-Document Version: 3.0
-Document Date: 2026-03-19
+Document Version: 4.0
+Document Date: 2026-03-20
 Classification: UNCLASSIFIED — FOR TRAINING USE ONLY
 
 ---
@@ -19,7 +19,8 @@ These procedures apply to all submarine classes assigned to this operational the
 
 | Hull | Class | Propulsion | Nation |
 |---|---|---|---|
-| SSN-700 USS Dallas | Los Angeles (688i) | Nuclear | United States |
+| SSN-700 USS Dallas | Los Angeles Flight I (688) | Nuclear | United States |
+| SSN-719 USS Providence | Los Angeles Improved (688i) | Nuclear | United States |
 | S107 HMS Trafalgar | Trafalgar | Nuclear | United Kingdom |
 | S126 HMS Swiftsure | Swiftsure | Nuclear | United Kingdom |
 | SSN-22 USS Connecticut | Seawolf | Nuclear | United States |
@@ -105,7 +106,9 @@ All player commands are executed from the command console. The following key ass
 
 ## Chapter 4 — Vessel Data
 
-### 4.1 USS Dallas (SSN-700) — Los Angeles Class
+### 4.1 USS Dallas (SSN-700) — Los Angeles Class (Flight I / Improved)
+
+Two variants are available: **USS Dallas (688, Flight I)** — the original without VLS, and **USS Providence (688i, Improved)** — the first 688i fitted with VLS. Both share identical internal layouts, crew, and handling characteristics. The only difference is the 688i's 12 external VLS cells for TASM cruise missiles.
 
 **Classification:** Nuclear-powered attack submarine (SSN)
 **Operational Assessment:** Medium difficulty. Recommended for initial qualification.
@@ -127,6 +130,11 @@ All player commands are executed from the command console. The following key ass
 | Acoustic Baseline | 0.040 (Low) |
 | Cavitation Onset | 18 kt (at reference depth) |
 | Hull Points | 100 |
+
+**Ship's Company:** 130 (approximately 58 per watch, 14 duty/supernumerary)
+**DC Teams:** 2 (Forward DC Party, Aft DC Party)
+**Compartmentation:** 6 watertight sections — see Chapter 13A
+**Magazine:** 26 total weapons (4 in tubes + 22 rack stowage) — see Chapter 12
 
 **Commanding Officer's Assessment:** SSN-700 is the backbone of the US submarine fleet. Sixty-two boats built over twenty-two years. Balanced across all systems with no significant weaknesses. The only vessel in this inventory with VLS capability for TASM cruise missiles. Standard patrol configuration provides capable all-round performance in both ASW and anti-surface warfare roles. Conventional screw propulsion produces a standard acoustic signature at speed. Recommended for initial qualification.
 
@@ -153,6 +161,11 @@ All player commands are executed from the command console. The following key ass
 | Cavitation Onset | 20 kt (at reference depth) |
 | Hull Points | 100 |
 
+**Ship's Company:** 130 (approximately 58 per watch, 14 duty/supernumerary)
+**DC Teams:** 2 (Forward DC Party, Aft DC Party)
+**Compartmentation:** 6 watertight sections — see Chapter 13A
+**Magazine:** 25 total weapons (5 in tubes + 20 rack stowage) — see Chapter 12
+
 **Commanding Officer's Assessment:** Lead boat of seven. First Royal Navy SSN fitted with a pump-jet propulsor instead of a conventional screw. The pump-jet delivers a marked acoustic advantage at speed — this boat is dramatically quieter during sprint phases than any screw-driven vessel. Narrower stern baffles than conventional boats. Armed with Spearfish — one of the fastest and hardest-hitting heavyweight torpedoes ever deployed, with a run speed in excess of 70 knots and superior ECCM. Five torpedo tubes — one more than the 688i. TYPE 2076 sonar suite is marginally superior to the American AN/BQQ-5D in passive detection. Favours aggressive, high-speed tactics.
 
 ### 4.3 HMS Swiftsure (S126) — Swiftsure Class
@@ -177,6 +190,11 @@ All player commands are executed from the command console. The following key ass
 | Acoustic Baseline | 0.038 (Low) |
 | Cavitation Onset | 17 kt (at reference depth) |
 | Hull Points | 90 |
+
+**Ship's Company:** 116 (approximately 51 per watch, 14 duty/supernumerary)
+**DC Teams:** 2 (Forward DC Party, Aft DC Party)
+**Compartmentation:** 6 watertight sections — see Chapter 13A
+**Magazine:** 20 total weapons (5 in tubes + 15 rack stowage) — see Chapter 12
 
 **Commanding Officer's Assessment:** Lead boat of six. Direct predecessor to the Trafalgar class. Conventional screw — noisier at speed than the pump-jet Trafalgars. Armed with Tigerfish Mk 24 — a 1974-vintage wire-guided torpedo. Reliable but substantially slower than Spearfish at 35 knots, with inferior ECCM and greater susceptibility to countermeasure seduction. Smaller weapons magazine (20 torpedoes), fewer countermeasures (10), reduced hull points (90), and an older sensor suite make this a harder boat to fight effectively. Shallower depth envelope — 350m diving limit compared to 400m for other SSNs. Wider stern baffles.
 
@@ -203,6 +221,11 @@ All player commands are executed from the command console. The following key ass
 | Cavitation Onset | 22 kt (at reference depth) |
 | Hull Points | 120 |
 
+**Ship's Company:** 140 (approximately 62 per watch, 16 duty/supernumerary)
+**DC Teams:** 2 (Forward DC Party, Aft DC Party)
+**Compartmentation:** 6 watertight sections — see Chapter 13A
+**Magazine:** 50 total weapons (8 in tubes + 42 rack stowage) — see Chapter 12
+
 **Commanding Officer's Assessment:** Only three completed before programme cancellation. Designed expressly to hunt Akula-class SSNs in Soviet home waters. Overbuilt for the task it was designed for. The most capable submarine ever constructed. Eight torpedo tubes provide double the salvo capacity of any other vessel. Fifty-weapon magazine permits sustained combat without ammunition conservation. AN/BQQ-5E sonar and TB-29A towed array represent the most capable sensor suite in any fleet submarine. 480m diving limit provides unmatched depth advantage — deeper than any Soviet opponent can follow. Quietest acoustic baseline in this inventory. 35-knot flank speed — fastest submarine in the fleet. The easy classification is by design.
 
 ### 4.5 U-36 — Type 209/1400mod
@@ -228,7 +251,84 @@ All player commands are executed from the command console. The following key ass
 | Cavitation Onset | 11 kt (at reference depth) |
 | Hull Points | 70 |
 
+**Ship's Company:** 35 (approximately 14 per watch, 7 duty/supernumerary)
+**DC Teams:** To be determined — see Chapter 14, Section 14.3
+**Compartmentation:** 5 watertight sections (no reactor compartment) — see Chapter 13A
+**Magazine:** 14 total weapons (8 in tubes + 6 rack stowage) — see Chapter 12
+
 **Commanding Officer's Assessment:** Deutsche Marine Type 209/1400mod variant. Diesel-electric propulsion: near-silent on battery — the lowest acoustic baseline of any vessel in this inventory. The most exported submarine design in history, operated by more than fourteen navies worldwide. However, snorkel operations broadcast the submarine's position across a wide area. Maximum depth 250m — the thermal layer floor is at 280m and this boat cannot dive below it. No towed array: hull sonar only, reduced detection range. Eight torpedo tubes but only fourteen weapons: every shot must count. SM39 Exocet launches from 55m — the deepest ASCM launch capability in this inventory. Expert rating. Battery management and snorkel exposure are unforgiving.
+
+**Crew impact note:** With only 35 crew, the Type 209 has the lowest damage tolerance of any vessel. Losing 5 crew members represents 14% of the complement — equivalent to losing 18 on a 130-crew SSN. Every casualty is felt across the boat.
+
+## Chapter 4A — Vessel Crew Complement Summary
+
+| Class | Nation | Total Crew | Per Watch | Duty | DC Teams |
+|-------|--------|-----------|-----------|------|----------|
+| Los Angeles (688i) | US | 130 | ~58 | ~14 | 2 |
+| Trafalgar | UK | 130 | ~58 | ~14 | 2 |
+| Swiftsure | UK | 116 | ~51 | ~14 | 2 |
+| Seawolf | US | 140 | ~62 | ~16 | 2 |
+| Type 209 | DE | 35 | ~14 | ~7 | TBD |
+
+### 4A.1 Watch Roles by Nation
+
+Watch roles and terminology differ by operating navy. Only key watchkeeper positions are listed — each exists in both Watch A and Watch B unless marked as duty.
+
+**United States Navy (688i, Seawolf):**
+
+| Role | Abbreviation | Location |
+|------|-------------|----------|
+| Commanding Officer | CO | Control Room (duty) |
+| Executive Officer | XO | Control Room (duty) |
+| Officer of the Deck | OOD | Control Room |
+| Diving Officer | DO | Control Room |
+| Chief of the Watch | COW | Control Room |
+| Fire Control Technician of the Watch | FTOW | Control Room |
+| Sonar Supervisor | SONAR SUP | Sonar Room |
+| Quartermaster of the Watch | QMOW | Control Room |
+| Helmsman | HELM | Control Room |
+| Planesman | PLANES | Control Room |
+| Engineering Officer of the Watch | EOOW | Maneuvering |
+| Throttleman | THROT | Maneuvering |
+| Reactor Operator | RO | Maneuvering |
+| Electrical Operator | EO | Maneuvering |
+| Torpedo Room Supervisor | TRS | Torpedo Room |
+| Radio Room Supervisor | RADIO SUP | Radio Room |
+
+**Royal Navy (Trafalgar, Swiftsure):**
+
+| Role | Abbreviation | Location |
+|------|-------------|----------|
+| Commanding Officer | CO | Control Room (duty) |
+| Executive Officer | XO | Control Room (duty) |
+| First Lieutenant | 1ST LT | Control Room (duty) |
+| Officer of the Watch | OOW | Control Room |
+| Coxswain | COX'N | Control Room (duty) |
+| Sonar Controller | SON CTL | Sound Room |
+| Planesman | PLNSMN | Control Room |
+| Helmsman | HELSMN | Control Room |
+| TDC Operator | TDC OP | Control Room |
+| Navigation Plotter | NAV PLT | Control Room |
+| Manoeuvring Room Watch Officer | MRWO | Maneuvering |
+| Chief of the Watch (Torpedo) | COW(T) | Torpedo Room (duty) |
+| Radio Operator | RADIO | Control Room |
+
+**Deutsche Marine (Type 209):**
+
+| Role | Abbreviation | Location |
+|------|-------------|----------|
+| Kommandant | KDT | Control Room (duty) |
+| Erster Wachoffizier | IWO | Control Room (duty) |
+| Wachoffizier | WO | Control Room |
+| Leitender Ingenieur | LI | Engine Compartment (duty) |
+| Obersteuermann | OSTM | Control Room |
+| Zentralemaat | ZM | Control Room |
+| Sonarmeister | SONM | Control Room |
+| Torpedomeister | TORM | Torpedo Room |
+| Maschinenmaat | MASM | Engine Compartment |
+| Elektromaat | EMAT | Motor Room |
+| Funker | FUNK | Control Room |
+| Sanitätsmaat | SANM | Accommodation (duty) |
 
 ---
 
@@ -841,6 +941,63 @@ Classification requires sustained quality above the threshold. If TMA quality dr
 
 # PART III — WEAPONS EMPLOYMENT
 
+## Chapter 9A — Magazine and Tube Management
+
+### 9A.1 Weapon Stowage
+
+Each submarine carries weapons in two locations:
+1. **Torpedo tubes** — weapons loaded and ready to fire. The number of tubes varies by vessel class (4-8).
+2. **Magazine rack** — reserve weapons stowed in the torpedo room on loading rails. Rack capacity varies by vessel class.
+
+Total weapon capacity = tubes + rack stowage. All submarines sail with tubes loaded (wartime standard operating procedure).
+
+| Class | Tubes | Rack Stowage | Total Capacity |
+|-------|-------|-------------|----------------|
+| Los Angeles (688i) | 4 | 22 | 26 |
+| Trafalgar | 5 | 20 | 25 |
+| Swiftsure | 5 | 15 | 20 |
+| Seawolf | 8 | 42 | 50 |
+| Type 209 | 8 | 6 | 14 |
+
+### 9A.2 Tube States
+
+Each torpedo tube cycles through these states:
+
+| State | Duration | Description |
+|-------|----------|-------------|
+| Empty | — | Tube is empty and available for loading |
+| Loading | Reload time (22-35s by class) | Weapon being loaded from rack. Tube not available. |
+| Loaded | — | Weapon in tube, ready to fire |
+| Firing | ~4.5s | Weapon launching. HPA consumed (2 bar per shot). |
+
+### 9A.3 Weapon Type Swapping — Magazine Full Restriction
+
+A loaded tube can only be unloaded (swapped to a different weapon type) if there is a free slot on the magazine rack to receive the removed weapon.
+
+**If the rack is full and all tubes are loaded, no swaps are possible.** The CO is committed to the current tube loadout until at least one weapon is fired, freeing both a tube and a rack slot.
+
+**Example — USS Dallas (4 tubes, 22 rack slots, 26 total weapons):**
+
+| Scenario | Tubes | Rack | Can Swap? |
+|----------|-------|------|-----------|
+| Start of patrol: 4 MK-48 loaded, 22 in rack | 4/4 loaded | 22/22 full | **No** — rack is full, nowhere to put the unloaded weapon |
+| After firing 1 torpedo: 3 loaded, 22 in rack | 3/4 loaded | 22/22 full | **No** — rack still full. Empty tube can load from rack but loaded tubes cannot swap. |
+| After firing 2 torpedoes: 2 loaded, 22 in rack | 2/4 loaded | 22/22 full | **No** — same constraint |
+| After reloading 1 tube from rack: 3 loaded, 21 in rack | 3/4 loaded | 21/22 | **Yes** — 1 free rack slot. Can unload a tube into the rack and load a different weapon type. |
+
+**Tactical implication:** The CO must plan weapon loadout before engagement. Once committed with a full magazine, the only way to change tube contents is to expend weapons. On the Type 209 with only 6 rack slots, this constraint is especially severe — with 8 tubes loaded and 6 in the rack, the boat sails with zero swap flexibility.
+
+### 9A.4 VLS Independence
+
+Vertical Launch System (VLS) cells are separate from the torpedo tube magazine system. VLS weapons:
+- Cannot be swapped with tube weapons
+- Cannot be reloaded at sea
+- Are fire-and-forget (no wire guidance)
+
+Only the 688i (Los Angeles class) carries VLS cells (12 x TASM).
+
+---
+
 ## Chapter 10 — Torpedo Operations
 
 ### 10.1 Torpedo Specifications
@@ -1110,40 +1267,106 @@ An active ping dazzles enemy torpedo seekers within 1,800 wu for 1.5 seconds. Th
 
 ### 13.1 Watertight Sections
 
-The submarine hull is divided into six watertight sections (WTS), separated by watertight doors. Each section contains multiple compartments across internal decks.
+The submarine hull is divided into watertight sections (WTS), separated by full-pressure-rated watertight bulkheads. These are massive structural members — submarines have only a small number of them (typically 2-3). Internal divisions within a WTS are non-watertight bulkheads that provide structural support and compartmentalisation but do not resist full sea pressure.
 
-| WTS | Designation | Complement | Primary Systems |
-|---|---|---|---|
-| 1 | Fore Ends (Torpedo Room) | 23 | Torpedo tubes, sonar array, TMA computer, forward planes |
-| 2 | Control Room | 20 | Helm, fire control, ballast control, periscope, navigation |
-| 3 | Mess Decks (Auxiliary) | 7 | CO2 scrubbers, O2 generator, auxiliary power, sickbay |
-| 4 | Reactor Compartment | 3 | Reactor, primary coolant, pressuriser, radiation monitoring |
-| 5 | Engine Room (Maneuvering) | 20 | Propulsion, main turbines, electrical distribution, emergency diesel |
-| 6 | Aft Ends (Engineering) | 15 | Towed array, steering gear, aft planes, shaft seals, escape trunk |
+The number of WTS, their arrangement, and crew complement vary by vessel class. Each WTS contains multiple compartments (rooms) across internal decks.
 
-Total complement: approximately 88 personnel.
+**Example — Los Angeles Class (688i): 3 watertight sections**
+
+| WTS | Designation | Primary Contents |
+|---|---|---|
+| 1 | Forward Compartment | Torpedo room, control room, sonar, comms, crew messes, wardroom, auxiliary machinery |
+| 2 | Reactor Compartment | Reactor, primary coolant, pressuriser, RC tunnel |
+| 3 | Engineering | Maneuvering, propulsion, electrical distribution, machinery |
+
+Other vessel classes have different WTS arrangements. See the vessel individuality design document (`VESSEL-INDIVIDUALITY.md`) for complete layouts.
+
+### 13.1A Pressure Hull vs External Equipment
+
+Each vessel has equipment both inside and outside the pressure hull:
+
+**Inside the pressure hull:** Crew-accessible watertight sections. Subject to flooding, fire, crew casualties, and DC team operations. This is what the DC panel displays.
+
+**External to the pressure hull:** Equipment mounted outside the pressure hull envelope. Not crew-accessible. Cannot have fires or crew casualties. Can be damaged by weapon hits.
+
+| External Equipment | Vessels | Notes |
+|---|---|---|
+| Bow Array (sonar dome) | All | Forward of pressure hull |
+| VLS Cells | 688i-VLS variant only | Between bow array and pressure hull |
+| Propshaft / Propulsor | All | Aft of pressure hull |
+| Towed Array Housing | Vessels with towed array | Aft, external |
+
+### 13.1B Vessel-Specific Compartment Layouts
+
+The detailed internal layout of each vessel — WTS structure, room arrangements, systems placement, crew positions, and DC panel proportions — is defined per vessel class from real submarine schematics.
+
+| Class | WTS Count | Complement | Layout Status |
+|-------|-----------|------------|---------------|
+| Los Angeles (688i) | 3 | 130 | Schematic received — layout specified |
+| Trafalgar | TBD | 130 | Awaiting schematic |
+| Swiftsure | TBD | 116 | Awaiting schematic |
+| Seawolf | TBD | 140 | Awaiting schematic |
+| Type 209 | TBD | 35 | Awaiting schematic |
 
 Some compartments within each section are unmanned during normal operations. Casualties in unmanned compartments (particularly fire) may go undetected for 30-60 seconds until sensor alarms trigger or watchkeepers notice secondary indications.
 
+### 13.1C Hull Volume Measurement
+
+Hull volume uses a standardised grid system derived from vessel schematics:
+
+**Unit hierarchy:**
+
+| Level | Definition | Size |
+|-------|-----------|------|
+| **Unit** | 1 cell on the schematic grid (1 column × 1 row) | 1 unit |
+| **Compartment** | Standard structural block: 2 columns × 4 rows | 8 units |
+| **Watchspace** | 1 or more compartments forming a functional area (e.g. Control Room, Torpedo Room) | variable |
+| **Watertight Section** | 1 or more watchspaces between watertight bulkheads | variable |
+
+A compartment (2×4 = 8 units) is the base unit of volume. All flooding rates, buoyancy impact, and DC effectiveness scale with section volume measured in compartments.
+
+**Section volumes by vessel class:**
+
+| Vessel | Section | Volume (compartments) |
+|--------|---------|----------------------|
+| 688 / 688i | Forward | 12 |
+| | Reactor | 3 |
+| | Engineering | 8 |
+| Trafalgar / Swiftsure | Forward | 12 |
+| | Reactor | 3 |
+| | Engineering | 8 |
+| Seawolf | Forward | 22 |
+| | Reactor | 8 |
+| | Engineering | 14 |
+| Type 209 | Forward | 4 |
+| | Midships | 5 |
+| | Aft | 5 |
+
+**Volume effects on gameplay:**
+- **Flood rate:** A breach fills in units/second. Small sections (reactor: 3 compartments) reach critical flooding faster than large sections (forward: 12+ compartments).
+- **Buoyancy:** Each flooded compartment adds the same weight. Forward flooding contributes more total buoyancy loss because it contains more compartments.
+- **DC effectiveness:** DC teams suppress at a fixed rate per compartment. They are proportionally more effective in small sections.
+
+---
+
 ### 13.2 Watertight Doors
 
-Five WTDs separate adjacent watertight sections:
+One WTD separates each pair of adjacent watertight sections. The number of WTDs varies per vessel class (WTS count - 1).
+
+**Example — Los Angeles Class (688i): 2 WTDs**
 
 | Door | Between |
 |---|---|
-| WTD 1 | WTS 1 (Fore Ends) — WTS 2 (Control Room) |
-| WTD 2 | WTS 2 (Control Room) — WTS 3 (Mess Decks) |
-| WTD 3 | WTS 3 (Mess Decks) — WTS 4 (Reactor Compartment) |
-| WTD 4 | WTS 4 (Reactor Compartment) — WTS 5 (Engine Room) |
-| WTD 5 | WTS 5 (Engine Room) — WTS 6 (Aft Ends) |
+| WTD 1 | WTS 1 (Forward Compartment) — WTS 2 (Reactor Compartment) |
+| WTD 2 | WTS 2 (Reactor Compartment) — WTS 3 (Engineering) |
 
 **Door states:**
 - **Open:** Normal condition. Crew transits freely. Flooding and fire spread unimpeded between sections.
 - **Closed:** Flooding and fire spread between sections is slowed. Crew transit is blocked except through the reactor tunnel bypass.
 
-**Hydraulic dependency:** WTD operation requires the main hydraulic plant (located in WTS 2, Control Room). If the hydraulic plant is destroyed, doors cannot be operated.
+**Hydraulic dependency:** WTD operation requires the main hydraulic plant. If the hydraulic plant is destroyed, doors cannot be operated.
 
-**Reactor tunnel bypass:** WTDs adjacent to the reactor compartment (WTD 3 and WTD 4) have a bypass tunnel through the reactor D1 top deck passage. Crew transit through these doors is never blocked, even when closed. This ensures DC teams can always reach the aft sections of the boat.
+**Reactor tunnel bypass (nuclear boats):** WTDs adjacent to the reactor compartment have a bypass tunnel (the RC tunnel) through the top of the reactor section. Crew transit through these doors is never blocked, even when closed. This ensures DC teams can always reach sections on either side of the reactor. On the LA class, the RC tunnel in WTS 2 means both WTDs have a bypass — crew can always transit the full length of the boat.
 
 ### 13.3 Shipboard Systems
 
@@ -1185,12 +1408,26 @@ Every major system is tracked individually and can be in one of four states:
 
 ### 14.1 DC Teams
 
-Two DC teams are embarked:
+Nuclear SSNs embark two DC teams. Team size scales with the vessel's complement.
 
 | Team | Designation | Muster Location | Area |
 |---|---|---|---|
-| Alpha | Forward DC Party | SR Mess (WTS 3) | Primary response — nearest casualty |
-| Bravo | Aft DC Party | Aft Passage (WTS 5) | Secondary response — second casualty or distant section |
+| Alpha | Forward DC Party | Accommodation Section (WTS 3) | Primary response — nearest casualty |
+| Bravo | Aft DC Party | Engine Room (WTS 5) | Secondary response — second casualty or distant section |
+
+DC team composition varies by vessel class. Each team is led by an officer and a senior rating drawn from the crew manifest. Remaining team members are drawn from the on-watch complement.
+
+### 14.3 Type 209 DC Organisation
+
+The Type 209 carries 35 crew — approximately 14 per watch. With this complement, maintaining two full DC teams is not feasible without stripping critical watchkeeping positions.
+
+**Open design question:** The Type 209 may operate with either:
+- **One DC team** of 5-6 personnel — simpler but slower response, no parallel casualty handling
+- **Two reduced DC teams** of 3-4 personnel each — parallel response possible but each team is dangerously thin
+
+This decision affects gameplay difficulty. A single team means the Type 209 cannot fight a fire and shore up flooding simultaneously — a second casualty while the team is engaged may be fatal. Two thin teams provide limited parallel response but each is less effective than a full-strength nuclear boat DC team.
+
+**Awaiting decision from Jason.**
 
 ### 14.2 Evolution: Emergency Stations (Called Automatically on Hit)
 
@@ -1292,26 +1529,46 @@ Total available: up to 207 bar (group) + 207 bar (reserve) = 414 bar at full cha
 
 ### 16.1 Evolution: Fire From Torpedo Hit
 
-**What happens:** The weapon impact ignites combustible material in compartments near the hit location. Fire intensity increases over time if unchecked. Fire spreads to adjacent compartments within the same watertight section. Equipment in burning compartments degrades. Personnel suffer casualties from heat and toxic gases.
+**What happens:** The weapon impact ignites combustible material in the watchspace near the hit location. Fire intensity increases over time if unchecked. Fire spreads to physically adjacent watchspaces within the same watertight section. Equipment in burning watchspaces degrades — damage is localised to the affected room and its immediate neighbours, not the entire section. Personnel suffer casualties from heat and toxic gases.
+
+**Fire detection and fog of war:**
+- **Manned watchspaces:** Fire is reported immediately by the crew on station.
+- **Unmanned watchspaces:** Fire burns undetected. The DC panel shows no indication until the fire detection sensor triggers at 40% intensity. The sensor alarm appears as a pulsing amber "ALARM" indicator on the affected room. A watchkeeper is dispatched to investigate (12-second delay). Only after investigation confirms the fire does it become fully visible on the DC panel with fire overlay and intensity percentage.
+- **False alarms:** Unmanned watchspaces may occasionally trigger false fire detection alarms. These follow the same investigation process but resolve as "false alarm — no fire found."
+
+**Fire spread:**
+- Fire spreads to physically adjacent watchspaces (rooms sharing a wall — same deck with touching boundaries, or adjacent decks with overlapping boundaries). Fire does not jump across a section to non-adjacent rooms.
+- Fire can only cross a watertight bulkhead after sustaining 100% intensity for an extended period (approximately 60 seconds). This burns through the bulkhead, damaging the watertight door system (preventing closure until repaired) and igniting fire in the adjacent section.
+
+**System damage from fire:**
+- Fire above 15% intensity causes progressive heat damage to systems in the affected watchspace. Damage is guaranteed over time (accumulator-based, not probabilistic) — approximately one system degradation step every 10 seconds at 80% fire intensity.
+- If the burning watchspace contains no systems, heat radiates to adjacent watchspaces and damages systems there.
+- Systems damaged by fire remain damaged after the fire is extinguished — they require DC team repair.
+
+**DC team fire suppression:**
+- DC teams can suppress fires up to approximately 80% intensity. Above 80%, the fire growth rate exceeds the team's suppression capacity and the fire continues to grow.
+- If the DC team cannot contain the fire, the N2 drench system is activated after a sustained losing battle.
+
+**Watertight door damage:**
+- Each watertight door is a damageable system. Fire burn-through destroys the WTD system, forcing the door open. The door cannot be closed until the WTD system is repaired by a DC team.
 
 **Watchperson actions:**
-1. **Manned compartments:** Fire is reported immediately by the crew on station.
-2. **Unmanned compartments:** Fire burns undetected for 30-60 seconds until sensor alarms trigger or smoke reaches a manned space.
-3. **DC teams** auto-dispatch to the fire. Fight with portable extinguishers.
-4. **DC Coordinator** assesses fire severity. If the fire cannot be contained with portable equipment:
-5. **Chief of the Watch** activates the fixed drench system (N2 drench) for the affected compartment. 20-second drench countdown.
-6. **OOW** orders evacuation of affected compartments if fire intensity threatens personnel.
+1. **Sensor alarm:** Investigate and confirm or clear the alarm.
+2. **Confirmed fire:** DC teams auto-dispatch. Fight with portable extinguishers.
+3. **DC Coordinator** assesses fire severity. If the fire cannot be contained with portable equipment:
+4. **Chief of the Watch** activates the fixed drench system (N2 drench) for the affected section. 20-second drench countdown.
+5. **OOW** orders evacuation of affected areas if fire intensity threatens personnel.
 
 **Drench system effects:**
-- The drenched compartment becomes uninhabitable — nitrogen displaces oxygen.
-- The compartment must be vented before crew can return.
-- The drench is highly effective at suppressing fire but makes the compartment temporarily unusable for all purposes.
+- The drenched section becomes uninhabitable — nitrogen displaces oxygen.
+- The section must be vented before crew can return.
+- The drench is highly effective at suppressing fire but makes the section temporarily unusable for all purposes.
 
 **Player response:**
-1. Press **H** to view the damage screen. Identify the fire location and severity.
+1. Press **H** to view the damage screen. Click on a watchspace for detailed status including systems, crew, and DC team dispatch buttons.
 2. Press **J** or **Tab** to view the DC LOG for fire suppression reports.
-3. DC teams handle fire suppression automatically. No direct player action is required for firefighting.
-4. Monitor fire spread. If fire reaches a section with critical systems (reactor, propulsion), the cascading effects may be severe.
+3. DC teams operate autonomously but the player can override dispatch by clicking watchspaces and using the dispatch/recall buttons in the detail panel.
+4. Monitor fire spread. Fire is localised to adjacent rooms — use the damage screen to track which specific watchspaces are affected.
 
 ---
 
@@ -1319,11 +1576,20 @@ Total available: up to 207 bar (group) + 207 bar (reserve) = 414 bar at full cha
 
 ### 17.1 Watch System
 
-The crew is divided into Watch A and Watch B. One watch is on duty while the other rests.
+The crew is divided into Watch A and Watch B. One watch is on duty while the other rests. Watch roles and terminology vary by operating navy (see Chapter 4A).
 
 - **Fatigue:** The on-watch crew fatigues over time, degrading sonar detection probability by up to 40%.
 - **Watch change:** Rotating the watch resets fatigue. There is a brief handover period.
 - **Action stations:** Both watches are called during combat. This doubles available crew but accelerates fatigue accumulation.
+
+**Crew size impact on watch quality:**
+
+| Class | On-Watch Personnel | Impact |
+|-------|-------------------|--------|
+| Seawolf (140) | ~62 | All stations fully manned with redundancy |
+| Dallas / Trafalgar (130) | ~58 | All stations fully manned |
+| Swiftsure (116) | ~51 | All stations manned, minimal redundancy |
+| Type 209 (35) | ~14 | Minimal manning — every position is single-manned. No redundancy. A single casualty in the Control Room or Engine Room immediately degrades capability. |
 
 ### 17.2 Personnel Casualties
 

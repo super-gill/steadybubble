@@ -8,6 +8,7 @@ import {
   L, C, TH,
 } from './panel-context.js';
 import { drawTdcSection } from './render-tdc.js';
+import { isTorpLoad } from '../../config/constants.js';
 
   export function drawPanel(W,H){
     const ctx = L.ctx;
@@ -365,7 +366,7 @@ import { drawTdcSection } from './render-tdc.js';
       for(let i=0;i<tubes.length;i++){
         const px=pipStartX+i*(pipW+pipGap);
         const wireOccupied=tubes[i]===-1||(player.tubeWires?.[i]?.wire?.live===true);
-        const ready=tubes[i]===0&&!wireOccupied; const load=tubeLoad[i]; const isMissileLoad=load&&load!=='torp';
+        const ready=tubes[i]===0&&!wireOccupied; const load=tubeLoad[i]; const isMissileLoad=load&&!isTorpLoad(load);
         const hasShell=ready&&load!=null&&(isMissileLoad?(mStock>0||true):stock>0);
         const pf=pending.find(p=>p.tubeIdx===i); const isSelected=i===selTube; const isOpTube=tubeOp?.tubeIdx===i;
         if(isSelected&&!pf&&!wireOccupied){ ctx.fillStyle='rgba(30,58,95,0.10)'; ctx.fillRect(px-U(1),pipY-U(1),pipW+U(2),pipH+U(2)); }
@@ -390,14 +391,30 @@ import { drawTdcSection } from './render-tdc.js';
         ctx.font=`${U(8)}px ui-monospace,monospace`; ctx.textAlign='left';
         if(wireOnSel){ ctx.fillStyle='rgba(13,148,136,0.50)'; ctx.fillText(`T${selTube+1} WIRE LIVE`,lmX+U(3),lmY+U(13));
         } else if(opOnSel){ const frac=clamp(tubeOp.progress/tubeOp.totalT,0,1); ctx.fillStyle='rgba(17,24,39,0.12)'; ctx.fillRect(lmX,lmY,lmW,lmH); ctx.fillStyle='rgba(180,140,60,0.35)'; ctx.fillRect(lmX,lmY,lmW*frac,lmH); ctx.fillStyle='rgba(180,140,60,0.80)'; const opLabels={load:'LOADING',unload:'UNLOADING',strike:'STRIKE RELOAD'}; ctx.fillText(`${opLabels[tubeOp.type]||'BUSY'} T${selTube+1}  ${Math.ceil(tubeOp.totalT-tubeOp.progress)}s`,lmX+U(3),lmY+U(13));
-        } else if(selLoad==null){ const nOpts=1+misTypes.length; const btnW2=(lmW-(nOpts-1)*lmGap)/nOpts; let bx=lmX;
-          btn('LD TORP',bx,lmY,btnW2,lmH,opBusy,()=>L.orderLoad?.(selTube,'torp'),opBusy?'rgba(17,24,39,0.10)':'rgba(17,24,39,0.25)'); bx+=btnW2+lmGap;
-          for(const mk of misTypes){ const ml=(C.weapons?.[mk]?.shortLabel||mk).slice(0,6); const canLoad=(mStock>0)&&!opBusy; btn(`LD ${ml}`,bx,lmY,btnW2,lmH,!canLoad,()=>L.orderLoad?.(selTube,mk),canLoad?'rgba(100,40,120,0.30)':'rgba(17,24,39,0.10)'); bx+=btnW2+lmGap; }
-        } else { const nOpts=1+(selLoad==='torp'?misTypes.length:1+misTypes.filter(mk=>mk!==selLoad).length); const btnW2=(lmW-(nOpts-1)*lmGap)/Math.max(nOpts,1); let bx=lmX;
+        } else if(selLoad==null){
+          // Empty tube — only show weapons with per-type rack stock
+          const rs=player.rackStock||{};
+          const torpKey=C.player.torpWeapon||'mk48_adcap';
+          const availOpts=[]; if((rs[torpKey]||0)>0) availOpts.push({key:torpKey,label:'LD TORP',isMis:false});
+          for(const mk of misTypes){ if((rs[mk]||0)>0) availOpts.push({key:mk,label:`LD ${(C.weapons?.[mk]?.shortLabel||mk).slice(0,6)}`,isMis:true}); }
+          if(availOpts.length===0){ ctx.fillStyle='rgba(17,24,39,0.30)'; ctx.font=`${U(8)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText('RACK EMPTY',lmX+lmW/2,lmY+U(13));
+          } else { const btnW2=(lmW-(availOpts.length-1)*lmGap)/availOpts.length; let bx=lmX;
+            for(const opt of availOpts){ btn(opt.label,bx,lmY,btnW2,lmH,opBusy,()=>L.orderLoad?.(selTube,opt.key),opBusy?'rgba(17,24,39,0.10)':opt.isMis?'rgba(100,40,120,0.30)':'rgba(17,24,39,0.25)'); bx+=btnW2+lmGap; }
+          }
+        } else {
+          // Loaded tube — unload + swap options (only show swaps with per-type stock)
+          const rs=player.rackStock||{};
+          const torpKey=C.player.torpWeapon||'mk48_adcap';
+          const swapOpts=[{key:'_unload',label:'UNLOAD',isMis:false}];
+          if(!isTorpLoad(selLoad)){ if((rs[torpKey]||0)>0) swapOpts.push({key:torpKey,label:'CHG TORP',isMis:false});
+          } else { for(const mk of misTypes){ if((rs[mk]||0)>0) swapOpts.push({key:mk,label:`CHG ${(C.weapons?.[mk]?.shortLabel||mk).slice(0,6)}`,isMis:true}); } }
+          const btnW2=(lmW-(swapOpts.length-1)*lmGap)/Math.max(swapOpts.length,1); let bx=lmX;
           const canAct=!opBusy&&selState===0;
-          btn('UNLOAD',bx,lmY,btnW2,lmH,!canAct,()=>L.orderUnload?.(selTube),canAct?'rgba(17,24,39,0.25)':'rgba(17,24,39,0.10)'); bx+=btnW2+lmGap;
-          if(selLoad!=='torp'){ const canChg=canAct&&(stock>0); btn('CHG TORP',bx,lmY,btnW2,lmH,!canChg,()=>L.orderStrikeReload?.(selTube,'torp'),canChg?'rgba(17,24,39,0.25)':'rgba(17,24,39,0.10)'); bx+=btnW2+lmGap;
-          } else { for(const mk of misTypes){ const ml=(C.weapons?.[mk]?.shortLabel||mk).slice(0,6); const canChg=canAct&&(mStock>0); btn(`CHG ${ml}`,bx,lmY,btnW2,lmH,!canChg,()=>L.orderStrikeReload?.(selTube,mk),canChg?'rgba(100,40,120,0.30)':'rgba(17,24,39,0.10)'); bx+=btnW2+lmGap; } }
+          for(const opt of swapOpts){
+            if(opt.key==='_unload'){ btn(opt.label,bx,lmY,btnW2,lmH,!canAct,()=>L.orderUnload?.(selTube),canAct?'rgba(17,24,39,0.25)':'rgba(17,24,39,0.10)');
+            } else { btn(opt.label,bx,lmY,btnW2,lmH,!canAct,()=>L.orderStrikeReload?.(selTube,opt.key),canAct?opt.isMis?'rgba(100,40,120,0.30)':'rgba(17,24,39,0.25)':'rgba(17,24,39,0.10)'); }
+            bx+=btnW2+lmGap;
+          }
         }
       }
       ctx.textAlign='left'; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.fillStyle='rgba(17,24,39,0.40)';

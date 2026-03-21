@@ -2,6 +2,7 @@
 
 import { setMsg, addLog, session } from '../state/session-state.js';
 import { queueLog } from '../state/sim-state.js';
+import { T, nation, stationLabel } from './terminology.js';
 
 // ── Priority constants ───────────────────────────────────────────────────
 export const P = { NORMAL:0, MED:1, CRIT:2 };
@@ -18,7 +19,9 @@ export function dcLog(text, priority=P.NORMAL) {
   if (session.dcLog.length > 120) session.dcLog.shift();
 }
 
-// ── Station → compartment map ────────────────────────────────────────────
+// ── Station → compartment map (now dynamic per nation) ───────────────────
+// Legacy static object kept for backwards compatibility — consumers that read
+// COMP_STATION[key] still work. But callers should prefer stationLabel(key).
 export const COMP_STATION = {
   fore_ends:    'TOR',
   control_room: 'CONN',
@@ -27,6 +30,9 @@ export const COMP_STATION = {
   engine_room:  'MAN',
   aft_ends:     'ENG',
 };
+
+// Dynamic station label — use this in new code.
+export { stationLabel };
 
 // ── Voice templates (moved to voice.js + voice-ops.js) ───────────────────
 import { flood, dc, sys, reactor, escape, planes, combat, weapons } from './voice.js';
@@ -39,15 +45,15 @@ import { nav, sensors, tactical, depth, trim, fire, medical, watch, snorkel, mas
 export const panel = {
   speedOrder(label, connOrder, engAck) {
     msg(label, 1.0);
-    log('CONN', connOrder);
-    qlog('ENG', engAck, 1.2);
+    log(T('stConn'), connOrder);
+    qlog(T('stEng'), engAck, 1.2);
   },
   speedOrderRelay(label, connOrder, engAck) {
     msg(label, 1.0);
-    const coOrder = connOrder.replace(/^Eng, Conn\s*—/, 'Manoeuvring, CO —');
-    log('CO', coOrder, P.MED);
-    qlog('ENG',  `CO, Manoeuvring — order received, aye`, 2.5);
-    qlog('ENG',  engAck, 5.0);
+    const coOrder = connOrder.replace(/^Eng, Conn\s*—/, `${T('maneuvering')}, ${T('co')} —`);
+    log(T('stCO'), coOrder, P.MED);
+    qlog(T('stEng'),  `${T('co')}, ${T('maneuvering')} — order received, ${T('aye')}`, 2.5);
+    qlog(T('stEng'),  engAck, 5.0);
   },
 };
 
@@ -66,55 +72,57 @@ export const commsUi = {
 };
 
 // ════════════════════════════════════════════════════════════════════════
-// CREW STATE TRANSITIONS
+// CREW STATE TRANSITIONS (nation-aware)
 // ════════════════════════════════════════════════════════════════════════
 export const crewState = {
   actionStations(cause) {
+    const as3 = T('actionStations3x');
     const lines = {
-      torpedo: `Conn — all stations — Action stations, action stations, action stations: Torpedo threat. Close up evasion stations.`,
-      contact: `Conn — all stations — Action stations, action stations, action stations: Submerged contact prosecuted. Close up action stations.`,
-      attack:  `Conn — all stations — Action stations, action stations, action stations: Weapons free. Close up action stations.`,
-      wave:    `Conn — all stations — Action stations, action stations, action stations: Multiple contacts. Close up action stations.`,
-      manual:  `Conn — all stations — Action stations, action stations, action stations: Assume defence watches.`,
+      torpedo: `${T('connAll')} — ${as3}: Torpedo threat. Close up evasion stations.`,
+      contact: `${T('connAll')} — ${as3}: Submerged contact prosecuted. Close up ${T('actionStations').toLowerCase()}.`,
+      attack:  `${T('connAll')} — ${as3}: Weapons free. Close up ${T('actionStations').toLowerCase()}.`,
+      wave:    `${T('connAll')} — ${as3}: Multiple contacts. Close up ${T('actionStations').toLowerCase()}.`,
+      manual:  `${T('connAll')} — ${as3}: Assume defence watches.`,
     };
-    log('CONN', lines[cause] || lines.manual, P.CRIT);
-    msg('ACTION STATIONS', 2.0);
+    log(T('stConn'), lines[cause] || lines.manual, P.CRIT);
+    msg(T('actionStationsU'), 2.0);
   },
   patrolState() {
-    log('CONN', 'Conn — all hands, close up patrol state. Contact possible. Assume war watches.', P.MED);
+    log(T('stConn'), `${T('connAll')} — close up patrol state. Contact possible. Assume war watches.`, P.MED);
     msg('PATROL STATE', 1.5);
   },
   standDown(fromState) {
     if (fromState === 'action') {
-      log('CONN', 'Conn — all hands, stand down from action stations. Assume cruising watch.', P.MED);
-      qlog('ENG',  'Conn, Eng — aye. Securing action state equipment.', 1.5);
-      qlog('WEPS', 'Conn, Weps — aye. Weapons safed. Tubes drained.', 2.5);
+      log(T('stConn'), `${T('connAll')} — ${T('standDown')} ${T('actionStations').toLowerCase()}. Assume cruising watch.`, P.MED);
+      qlog(T('stEng'),  `${T('engConn')} — ${T('aye')}. Securing action state equipment.`, 1.5);
+      qlog(T('stWeps'), `${T('wepsConn')} — ${T('aye')}. Weapons safed. Tubes drained.`, 2.5);
       msg('STAND DOWN — CRUISING WATCH', 1.5);
     } else {
-      log('CONN', 'Conn — all hands, stand down. Resume normal watch routine.', P.MED);
+      log(T('stConn'), `${T('connAll')} — ${T('standDown')} normal watch routine.`, P.MED);
       msg('NORMAL WATCH', 1.2);
     }
   },
   emergencyStations(cause) {
+    const es3 = T('emergencyStations3x');
     const lines = {
-      flood:   `Conn — all hands — Emergency stations, emergency stations, emergency stations: Flood, flood, flood. DC teams close up.`,
-      reactor: `Conn — all hands — Emergency stations, emergency stations, emergency stations: Reactor casualty. Close up emergency stations.`,
-      fire:    `Conn — all hands — Emergency stations, emergency stations, emergency stations: Fire, fire, fire. Close up emergency stations.`,
+      flood:   `${T('connAll')} — ${es3}: Flood, flood, flood. DC teams close up.`,
+      reactor: `${T('connAll')} — ${es3}: Reactor casualty. Close up emergency stations.`,
+      fire:    `${T('connAll')} — ${es3}: Fire, fire, fire. Close up emergency stations.`,
     };
-    log('CONN', lines[cause] || `Conn — all hands — Emergency stations, emergency stations, emergency stations: Close up emergency stations.`, P.CRIT);
-    msg('EMERGENCY STATIONS', 2.5);
+    log(T('stConn'), lines[cause] || `${T('connAll')} — ${es3}: Close up emergency stations.`, P.CRIT);
+    msg(T('emergencyStations'), 2.5);
   },
   casualtyControlled(cause) {
     const lines = {
-      flood: 'Conn — all hands, flooding casualty controlled. Secure from emergency stations. Resume normal watch.',
-      fire:  'Conn — all hands, fire casualty controlled. Secure from emergency stations. Resume normal watch.',
+      flood: `${T('connAll')} — flooding casualty controlled. Secure from emergency stations. Resume normal watch.`,
+      fire:  `${T('connAll')} — fire casualty controlled. Secure from emergency stations. Resume normal watch.`,
     };
-    log('CONN', lines[cause] || 'Conn — all hands, casualty controlled. Secure from emergency stations.', P.MED);
+    log(T('stConn'), lines[cause] || `${T('connAll')} — casualty controlled. Secure from emergency stations.`, P.MED);
     msg('CASUALTY CONTROLLED', 1.5);
   },
   escapeStations() {
-    log('CONN', 'Conn — all hands — Escape stations, escape stations, escape stations: Abandon ship. This is not a drill.', P.CRIT);
-    msg('ESCAPE STATIONS', 3.0);
+    log(T('stConn'), `${T('connAll')} — ${T('escapeStations3x')}: Abandon ship. This is not a drill.`, P.CRIT);
+    msg(T('escapeStations'), 3.0);
   },
 };
 

@@ -2,6 +2,7 @@
 'use strict';
 
 import { clamp, player, session, ui, L, C } from './panel-context.js';
+import { getLayout } from '../../config/vessel-layouts/index.js';
 
   export function drawDamageScreen(W,H){
     const ctx = L.ctx;
@@ -100,39 +101,155 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
     // ── 3-Deck Schematic ───────────────────────────────────────────────────────
     const schX=P, schW=LW-P*2, schH=U(310), schY=cy;
     const compKeys=DMG.COMPS;
-    const compLabels=['WT SECT 1','WT SECT 2','WT SECT 3','WT SECT 4','WT SECT 5','WT SECT 6'];
-    const compFracs=[0.18,0.22,0.14,0.10,0.22,0.14];
-    const dH=U(64);
-    const phTop=schY+Math.round(schH*0.26), phBot=schY+Math.round(schH*0.26)+3*dH;
+    const compLabels=DMG.COMP_LABELS;
+    const compFracs=DMG.COMP_FRACS;
+    // Compute number of decks and their heights from layout data
+    const _allRooms=Object.values(DMG.ROOMS);
+    const _maxDeck=_allRooms.reduce((mx,r)=>Math.max(mx,r.deck||0),0);
+    const numDecks=Math.max(2, _maxDeck+1); // deck indices are 0-based
+    // Support non-uniform deck heights via DECK_HEIGHTS from layout (e.g. Type 209: [2,1])
+    const _layoutDeckH=DMG.COMP_FRACS?.__deckHeights; // not used yet, check layout export
+    const _deckWeights=_allRooms[0]&&getLayout?null:null; // placeholder
+    // Read DECK_HEIGHTS from the active layout if available
+    const _activeLayout=typeof getLayout==='function'?getLayout(session.vesselKey||'688'):null;
+    const deckWeights=_activeLayout?.DECK_HEIGHTS||Array(numDecks).fill(1);
+    const totalWeight=deckWeights.reduce((s,w)=>s+w,0);
+    const totalDeckH=U(numDecks<=2?96:numDecks===3?192:numDecks===4?200:220);
+    const deckHeights=deckWeights.map(w=>totalDeckH*(w/totalWeight));
+    const phTop=schY+Math.round(schH*0.26), phBot=phTop+totalDeckH;
     const phMid=(phTop+phBot)*0.5; const phR=(phBot-phTop)*0.5;
     const phX0=schX+phR+U(18), phX1=schX+schW-phR-U(18), phSpan=phX1-phX0;
     const ohR=phR+U(8), ohTop=phMid-ohR, ohBot=phMid+ohR;
     const sailCX=phX0+phSpan*(0.21+0.105);
     const sailW2=U(86), sailH2=U(58), sailBot2=ohTop, sailTop2=sailBot2-sailH2;
-    const d1Top=phTop, d2Top=phTop+dH, d3Top=phTop+2*dH;
-    const deckTops=[d1Top,d2Top,d3Top];
+    const deckTops=[];
+    { let y=phTop; for(let di=0;di<numDecks;di++){ deckTops.push(y); y+=deckHeights[di]; } }
+    // dH = uniform fallback for legacy code. Use deckH(di,ds) for accurate per-deck heights.
+    const dH=totalDeckH/numDecks;
+    function deckH(di,ds){ let h=0; for(let i=di;i<Math.min(di+(ds||1),numDecks);i++) h+=deckHeights[i]; return h; }
     let compXs=[],compWs=[];
-    { let xx=phX0; for(let i=0;i<6;i++){ compWs[i]=phSpan*compFracs[i]; compXs[i]=xx; xx+=compWs[i]; } }
+    { let xx=phX0; for(let i=0;i<compKeys.length;i++){ compWs[i]=phSpan*compFracs[i]; compXs[i]=xx; xx+=compWs[i]; } }
     const COMP_LAYOUT = {
+      // ── Legacy 6-WTS rooms ────────────────────────────────────────────────
       fore_ends:[{c:0,cs:1,d:0,ds:1,lbl:'FWD DOME',cap:6,rid:'fore_ends_d0'},{c:1,cs:2,d:0,ds:1,lbl:'COMMS',cap:12,rid:'fore_ends_d0b'},{c:0,cs:1,d:1,ds:1,lbl:'ENG OFFICE',cap:6,rid:'fore_ends_d1'},{c:1,cs:2,d:1,ds:1,lbl:'COMPUTER RM',cap:12,rid:'fore_ends_d1b'},{c:0,cs:3,d:2,ds:1,lbl:'TORPEDO ROOM',cap:18,rid:'fore_ends_d2'}],
       control_room:[{c:0,cs:1,d:0,ds:1,lbl:'NAV',cap:6,rid:'control_room_d0'},{c:1,cs:1,d:0,ds:1,lbl:'SCOPE',cap:6,rid:'control_room_d0b'},{c:2,cs:1,d:0,ds:1,lbl:'WARDROOM',cap:6,rid:'control_room_d0c'},{c:0,cs:1,d:1,ds:1,lbl:'CO CABIN',cap:6,rid:'control_room_d1b'},{c:1,cs:2,d:1,ds:1,lbl:'CONTROL ROOM',cap:12,rid:'control_room_d1'},{c:0,cs:3,d:2,ds:1,lbl:'MACHINERY SP',cap:18,rid:'control_room_d2'}],
       aux_section:[{c:0,cs:1,d:0,ds:1,lbl:'JR MESS',cap:6,rid:'aux_section_d0'},{c:1,cs:2,d:0,ds:1,lbl:'SR MESS',cap:12,rid:'aux_section_d0b'},{c:0,cs:2,d:1,ds:1,lbl:'BUNKS',cap:12,rid:'aux_section_d1'},{c:2,cs:1,d:1,ds:1,lbl:'VENT PLANT',cap:6,rid:'aux_section_d1b'},{c:0,cs:1,d:2,ds:1,lbl:'AMS 1',cap:6,rid:'aux_section_d2'},{c:1,cs:1,d:2,ds:1,lbl:'RX E-COOL',cap:6,rid:'aux_section_d2b'},{c:2,cs:1,d:2,ds:1,lbl:'SICKBAY',cap:6,rid:'aux_section_d2c'}],
       reactor_comp:[{c:0,cs:3,d:0,ds:1,lbl:'RC TUNNEL',cap:18,rid:'reactor_comp_d0'},{c:0,cs:3,d:1,ds:2,lbl:'REACTOR',cap:36,rid:['reactor_comp_d1','reactor_comp_d2']}],
       engine_room:[{c:0,cs:1,d:0,ds:1,lbl:'AFT PASS',cap:6,rid:'engine_room_d0'},{c:1,cs:2,d:0,ds:1,lbl:'MANEUVERING',cap:12,rid:'engine_room_d0b'},{c:0,cs:3,d:1,ds:1,lbl:'ELEC DIST',cap:18,rid:'engine_room_d1'},{c:0,cs:3,d:2,ds:1,lbl:'AFT ATMOS',cap:18,rid:'engine_room_d2'}],
       aft_ends:[{c:0,cs:1,d:0,ds:1,lbl:'AFT ESCAPE',cap:6,rid:'aft_ends_d2b'},{c:1,cs:2,d:0,ds:1,lbl:'ENGINEERING',cap:12,rid:'aft_ends_d0'},{c:0,cs:2,d:1,ds:1,lbl:'PROPULSION',cap:12,rid:'aft_ends_d1'},{c:2,cs:1,d:1,ds:1,lbl:'SHAFT ALLEY',cap:6,rid:'aft_ends_d1b'},{c:0,cs:3,d:2,ds:1,lbl:'STEER GEAR',cap:18,rid:'aft_ends_d2'}],
+      // ── 688 / 688i — 3 WTS rooms (from schematic) ────────────────────────
+      // c=column(0-3), cs=colSpan, d=deck(0-2), ds=deckSpan. 4 columns per WTS for forward, 1 for reactor, variable for engineering.
+      forward:[
+        // c:0 = bow (left), c:3 = aft/reactor side (right)
+        {c:0,cs:1,d:0,ds:1,lbl:'COMPUTER RM',cap:6,rid:'fwd_computer'},
+        {c:1,cs:1,d:0,ds:1,lbl:'SONAR ROOM',cap:6,rid:'fwd_sonar'},
+        {c:2,cs:1,d:0,ds:1,lbl:'CONTROL ROOM',cap:6,rid:'fwd_control'},
+        {c:3,cs:1,d:0,ds:1,lbl:'COMMS',cap:6,rid:'fwd_comms'},
+        {c:0,cs:1,d:1,ds:1,lbl:'WARDROOM',cap:6,rid:'fwd_wardroom'},
+        {c:1,cs:2,d:1,ds:1,lbl:'CREW MESS',cap:12,rid:'fwd_mess_mid'},
+        {c:3,cs:1,d:1,ds:1,lbl:'DIESEL ENG',cap:6,rid:'fwd_diesel'},
+        {c:0,cs:2,d:2,ds:1,lbl:'TORPEDO ROOM',cap:12,rid:'fwd_torpedo'},
+        {c:2,cs:1,d:2,ds:1,lbl:'CREW MESS',cap:6,rid:'fwd_mess_lower'},
+        {c:3,cs:1,d:2,ds:1,lbl:'AUX MACH',cap:6,rid:'fwd_aux'},
+        {c:0,cs:4,d:3,ds:1,lbl:'BATTERY',cap:24,rid:'fwd_battery'},
+      ],
+      reactor:[
+        {c:0,cs:3,d:0,ds:1,lbl:'RC TUNNEL',cap:18,rid:'rx_tunnel'},
+        {c:0,cs:3,d:1,ds:2,lbl:'REACTOR',cap:36,rid:'rx_reactor'},
+      ],
+      engineering:[
+        // c:0 = reactor side (left), c:1-2 = stern side (right)
+        {c:0,cs:1,d:0,ds:1,lbl:'MANEUVERING',cap:6,rid:'eng_maneuvering'},
+        {c:0,cs:1,d:1,ds:1,lbl:'ELEC DIST',cap:6,rid:'eng_elec'},
+        {c:0,cs:1,d:2,ds:1,lbl:'MACHINERY',cap:6,rid:'eng_machinery'},
+        {c:1,cs:2,d:0,ds:3,lbl:'ENGINEERING',cap:36,rid:'eng_main'},
+      ],
     };
+    // Vessel-specific forward compartment layouts (same COMPS key 'forward', different room arrangement)
+    const _vk=session.vesselKey||'688';
+    if(_vk==='seawolf'){
+      COMP_LAYOUT.forward=[
+        {c:0,cs:1,d:0,ds:1,lbl:'COMMS',cap:6,rid:'fwd_comms'},
+        {c:1,cs:1,d:0,ds:1,lbl:'SONAR ROOM',cap:6,rid:'fwd_sonar'},
+        {c:2,cs:1,d:0,ds:1,lbl:'CONTROL ROOM',cap:6,rid:'fwd_control'},
+        {c:3,cs:1,d:0,ds:1,lbl:'WARDROOM',cap:6,rid:'fwd_wardroom'},
+        {c:0,cs:1,d:1,ds:1,lbl:'COMPUTER RM',cap:6,rid:'fwd_computer'},
+        {c:1,cs:2,d:1,ds:1,lbl:'CREW MESS',cap:12,rid:'fwd_mess_lg'},
+        {c:3,cs:1,d:1,ds:1,lbl:'CREW MESS',cap:6,rid:'fwd_mess_sm'},
+        {c:0,cs:3,d:2,ds:2,lbl:'TORPEDO ROOM',cap:36,rid:'fwd_torpedo'},
+        {c:3,cs:1,d:2,ds:1,lbl:'AUX MACH',cap:6,rid:'fwd_aux'},
+        {c:3,cs:1,d:3,ds:1,lbl:'DIESEL ENG',cap:6,rid:'fwd_diesel'},
+        {c:0,cs:4,d:4,ds:1,lbl:'BATTERY',cap:24,rid:'fwd_battery'},
+      ];
+      COMP_LAYOUT.reactor=[
+        {c:0,cs:1,d:0,ds:1,lbl:'RC TUNNEL',cap:6,rid:'rx_tunnel'},
+        {c:1,cs:1,d:0,ds:1,lbl:'RC COMPUTER',cap:6,rid:'rx_computer'},
+        {c:0,cs:1,d:1,ds:3,lbl:'REACTOR',cap:18,rid:'rx_reactor'},
+        {c:1,cs:1,d:1,ds:3,lbl:'RX SUPPORT',cap:18,rid:'rx_support'},
+      ];
+      COMP_LAYOUT.engineering=[
+        {c:0,cs:1,d:0,ds:1,lbl:'MANEUVERING',cap:6,rid:'eng_maneuvering'},
+        {c:0,cs:1,d:1,ds:1,lbl:'ELEC DIST',cap:6,rid:'eng_elec'},
+        {c:0,cs:1,d:2,ds:1,lbl:'CONDENSER',cap:6,rid:'eng_condenser'},
+        {c:0,cs:1,d:3,ds:1,lbl:'MACHINERY',cap:6,rid:'eng_machinery'},
+        {c:1,cs:2,d:0,ds:4,lbl:'ENGINEERING',cap:48,rid:'eng_main'},
+      ];
+    } else if(_vk==='type209'){
+      COMP_LAYOUT.forward=[
+        {c:0,cs:1,d:0,ds:1,lbl:'TORPEDO ROOM',cap:6,rid:'fwd_torpedo'},
+        {c:1,cs:1,d:0,ds:1,lbl:'CREW MESS',cap:6,rid:'fwd_crew_mess'},
+        {c:0,cs:1,d:1,ds:1,lbl:'TORP STORAGE',cap:6,rid:'fwd_torp_stow'},
+        {c:1,cs:1,d:1,ds:1,lbl:'BATTERY',cap:6,rid:'fwd_battery'},
+      ];
+      COMP_LAYOUT.midships=[
+        {c:0,cs:1,d:0,ds:1,lbl:'WARDROOM',cap:6,rid:'mid_wardroom'},
+        {c:1,cs:1,d:0,ds:1,lbl:'CTRL / SONAR',cap:6,rid:'mid_ctrlsonar'},
+        {c:2,cs:1,d:0,ds:1,lbl:'ELEC DIST',cap:6,rid:'mid_elec'},
+        {c:0,cs:1,d:1,ds:1,lbl:'BATTERY',cap:6,rid:'mid_batt_fwd'},
+        {c:1,cs:1,d:1,ds:1,lbl:'BATTERY',cap:6,rid:'mid_batt_mid'},
+        {c:2,cs:1,d:1,ds:1,lbl:'BATTERY',cap:6,rid:'mid_batt_aft'},
+      ];
+      COMP_LAYOUT.aft=[
+        {c:0,cs:1,d:0,ds:1,lbl:'DIESEL ENG',cap:6,rid:'aft_diesel_fwd'},
+        {c:1,cs:1,d:0,ds:1,lbl:'DIESEL ENG',cap:6,rid:'aft_diesel_aft'},
+        {c:2,cs:1,d:0,ds:1,lbl:'ELEC MOTOR',cap:6,rid:'aft_motor'},
+        {c:0,cs:1,d:1,ds:1,lbl:'BATTERY',cap:6,rid:'aft_batt_fwd'},
+        {c:1,cs:1,d:1,ds:1,lbl:'BATTERY',cap:6,rid:'aft_batt_aft'},
+      ];
+    } else if(_vk==='trafalgar'||_vk==='swiftsure'){
+      COMP_LAYOUT.forward=[
+        // c:0=bow, c:3=aft. Wardroom spans 2 decks. Ctrl/Sonar is combined room.
+        {c:0,cs:1,d:0,ds:2,lbl:'WARDROOM',cap:12,rid:['fwd_wardroom','fwd_wardroom_lo']},
+        {c:1,cs:1,d:0,ds:1,lbl:'COMPUTER RM',cap:6,rid:'fwd_computer'},
+        {c:2,cs:1,d:0,ds:1,lbl:'CTRL / SONAR',cap:6,rid:'fwd_ctrlsonar'},
+        {c:3,cs:1,d:0,ds:1,lbl:'COMMS',cap:6,rid:'fwd_comms'},
+        {c:1,cs:2,d:1,ds:1,lbl:'CREW MESS',cap:12,rid:'fwd_mess_sm'},
+        {c:3,cs:1,d:1,ds:1,lbl:'CREW MESS',cap:6,rid:'fwd_mess_lg'},
+        {c:0,cs:2,d:2,ds:1,lbl:'TORPEDO ROOM',cap:12,rid:'fwd_torpedo'},
+        {c:2,cs:1,d:2,ds:1,lbl:'DIESEL ENG',cap:6,rid:'fwd_diesel'},
+        {c:3,cs:1,d:2,ds:1,lbl:'AUX MACH',cap:6,rid:'fwd_aux'},
+        {c:0,cs:4,d:3,ds:1,lbl:'BATTERY',cap:24,rid:'fwd_battery'},
+      ];
+    }
     const COMP_LAYOUT_DIESEL = {
       reactor_comp:[{c:0,cs:3,d:0,ds:1,lbl:'ENG PASSAGE',cap:18,rid:'reactor_comp_d0'},{c:0,cs:3,d:1,ds:2,lbl:'DIESEL ENGINE',cap:36,rid:['reactor_comp_d1','reactor_comp_d2']}],
       engine_room:[{c:0,cs:1,d:0,ds:1,lbl:'AFT PASS',cap:6,rid:'engine_room_d0'},{c:1,cs:2,d:0,ds:1,lbl:'MOTOR CTRL',cap:12,rid:'engine_room_d0b'},{c:0,cs:3,d:1,ds:1,lbl:'BATT BANK 1',cap:18,rid:'engine_room_d1'},{c:0,cs:3,d:2,ds:1,lbl:'BATT BANK 2',cap:18,rid:'engine_room_d2'}],
       aux_section:[{c:0,cs:1,d:0,ds:1,lbl:'JR MESS',cap:6,rid:'aux_section_d0'},{c:1,cs:2,d:0,ds:1,lbl:'SR MESS',cap:12,rid:'aux_section_d0b'},{c:0,cs:2,d:1,ds:1,lbl:'BUNKS',cap:12,rid:'aux_section_d1'},{c:2,cs:1,d:1,ds:1,lbl:'VENT PLANT',cap:6,rid:'aux_section_d1b'},{c:0,cs:1,d:2,ds:1,lbl:'AMS 1',cap:6,rid:'aux_section_d2'},{c:1,cs:1,d:2,ds:1,lbl:'BATT MON',cap:6,rid:'aux_section_d2b'},{c:2,cs:1,d:2,ds:1,lbl:'SICKBAY',cap:6,rid:'aux_section_d2c'}],
     };
     function getCompLayout(comp){ return (C.player.isDiesel && COMP_LAYOUT_DIESEL[comp]) || COMP_LAYOUT[comp] || []; }
+    // Compute max columns for a compartment's room grid (legacy=3, 688 forward=4)
+    function getCompCols(comp){ const layout=getCompLayout(comp); if(!layout.length) return 3; return Math.max(1, ...layout.map(b=>b.c+b.cs)); }
+    // Visible fire level — only show fires that have been confirmed by a watchkeeper
+    function _visibleFire(rid){ return dmg._fireDetected?.[rid] ? (dmg.fire?.[rid]||0) : 0; }
+    // Alarm state — sensor alarm triggered but not yet confirmed
+    function _hasAlarm(rid){ return !!(dmg._fireAlarmFired?.[rid] || dmg._fireAlarmFalse?.[rid]) && !dmg._fireDetected?.[rid]; }
     const stFill={nominal:'rgba(18,55,28,0.88)',degraded:'rgba(75,58,4,0.90)',offline:'rgba(75,22,4,0.92)',destroyed:'rgba(55,4,4,0.96)'};
     const stStroke={nominal:'rgba(50,200,80,0.55)',degraded:'rgba(220,170,20,0.80)',offline:'rgba(220,80,20,0.90)',destroyed:'rgba(200,30,30,1.0)'};
     function dsphPill(){ ctx.beginPath(); ctx.arc(phX0,phMid,phR,Math.PI*0.5,-Math.PI*0.5,false); ctx.lineTo(phX1,phTop); ctx.arc(phX1,phMid,phR,-Math.PI*0.5,Math.PI*0.5,false); ctx.lineTo(phX0,phBot); ctx.closePath(); }
     function dsohPill(){ ctx.beginPath(); ctx.arc(phX0,phMid,ohR,Math.PI*0.5,-Math.PI*0.5,false); ctx.lineTo(phX1,ohTop); ctx.arc(phX1,phMid,ohR,-Math.PI*0.5,Math.PI*0.5,false); ctx.lineTo(phX0,ohBot); ctx.closePath(); }
-    function deckFloodFrac(flood,isFlooded,di){ if(isFlooded) return 1; const t=flood*3; return di===2?Math.min(1,Math.max(0,t)):di===1?Math.min(1,Math.max(0,t-1)):Math.min(1,Math.max(0,t-2)); }
-    const cState=compKeys.map(comp=>{ const sysList=DMG.activeSystems(comp); let wi=0; for(const s of sysList) wi=Math.max(wi,DMG.STATES.indexOf(dmg.systems[s]||'nominal')); const rooms=DMG.SECTION_ROOMS[comp]||[]; const fires=[0,1,2].map(di=>Math.max(...rooms.filter(rid=>(DMG.ROOMS[rid]?.deck??-1)===di).map(rid=>dmg.fire?.[rid]||0),0)); return {wi,worst:DMG.STATES[wi],flood:dmg.flooding[comp]||0,isFlooded:!!dmg.flooded[comp],fireLevel:Math.max(...fires),fires}; });
+    function deckFloodFrac(flood,isFlooded,di){ if(isFlooded) return 1; const t=flood*numDecks; const deckFromBottom=numDecks-1-di; return Math.min(1,Math.max(0,t-deckFromBottom)); }
+    const _deckRange=Array.from({length:numDecks},(_,i)=>i);
+    const cState=compKeys.map(comp=>{ const sysList=DMG.activeSystems(comp); let wi=0; for(const s of sysList) wi=Math.max(wi,DMG.STATES.indexOf(dmg.systems[s]||'nominal')); const rooms=DMG.SECTION_ROOMS[comp]||[]; const fires=_deckRange.map(di=>Math.max(...rooms.filter(rid=>(DMG.ROOMS[rid]?.deck??-1)===di).map(rid=>_visibleFire(rid)),0)); const hasAlarm=rooms.some(rid=>_hasAlarm(rid)); return {wi,worst:DMG.STATES[wi],flood:dmg.flooding[comp]||0,isFlooded:!!dmg.flooded[comp],fireLevel:Math.max(...fires),fires,hasAlarm}; });
 
     ctx.save(); dsohPill(); ctx.strokeStyle='rgba(100,130,180,0.35)'; ctx.lineWidth=U(1.5); ctx.setLineDash([U(3),U(4)]); ctx.stroke(); ctx.setLineDash([]);
     const sX0=sailCX-sailW2*0.5, sX1=sailCX+sailW2*0.5;
@@ -149,52 +266,145 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
     for(let a=0;a<3;a++){ const ang=a*Math.PI/3; ctx.beginPath(); ctx.moveTo(prX+Math.cos(ang)*prR2*0.3,prY+Math.sin(ang)*prR2*0.3); ctx.bezierCurveTo(prX+Math.cos(ang+0.8)*prR2,prY+Math.sin(ang+0.8)*prR2,prX+Math.cos(ang+1.0)*prR2,prY+Math.sin(ang+1.0)*prR2,prX+Math.cos(ang+1.2)*prR2,prY+Math.sin(ang+1.2)*prR2); ctx.moveTo(prX+Math.cos(ang+Math.PI)*prR2*0.3,prY+Math.sin(ang+Math.PI)*prR2*0.3); ctx.bezierCurveTo(prX+Math.cos(ang+Math.PI+0.8)*prR2,prY+Math.sin(ang+Math.PI+0.8)*prR2,prX+Math.cos(ang+Math.PI+1.0)*prR2,prY+Math.sin(ang+Math.PI+1.0)*prR2,prX+Math.cos(ang+Math.PI+1.2)*prR2,prY+Math.sin(ang+Math.PI+1.2)*prR2); ctx.stroke(); }
     ctx.beginPath(); ctx.arc(prX,prY,U(2.5),0,Math.PI*2); ctx.stroke(); ctx.restore();
 
-    for(let ci=0;ci<6;ci++){ const comp=compKeys[ci]; const cs=cState[ci]; const cx2=compXs[ci], cw=compWs[ci]; const fx=ci===0?cx2-phR:cx2, fw=(ci===0||ci===5)?cw+phR:cw;
-      for(let di=0;di<3;di++){ const dTop=deckTops[di]; ctx.save(); dsphPill(); ctx.clip();
-        ctx.fillStyle=cs.isFlooded?'rgba(8,18,70,0.98)':(stFill[cs.worst]||stFill.nominal); ctx.fillRect(fx,dTop,fw,dH);
-        if(cs.wi>0){ const gc=['','rgba(220,170,20,0.13)','rgba(220,80,20,0.17)','rgba(200,30,30,0.22)']; ctx.fillStyle=gc[cs.wi]||''; ctx.fillRect(fx,dTop,fw,dH); }
-        const ff=deckFloodFrac(cs.flood,cs.isFlooded,di);
-        if(ff>0){ const fH=dH*ff; ctx.fillStyle=`rgba(28,75,200,${0.30+ff*0.46})`; ctx.fillRect(fx,dTop+dH-fH,fw,fH); if(ff<0.99&&ff>0.01){ ctx.strokeStyle='rgba(100,160,255,0.60)'; ctx.lineWidth=U(1); ctx.beginPath(); ctx.moveTo(fx,dTop+dH-fH); ctx.lineTo(fx+fw,dTop+dH-fH); ctx.stroke(); } }
+    for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci]; const _cc=getCompCols(comp); const cs=cState[ci]; const cx2=compXs[ci], cw=compWs[ci]; const fx=ci===0?cx2-phR:cx2, fw=(ci===0||ci===compKeys.length-1)?cw+phR:cw;
+      for(let di=0;di<numDecks;di++){ const dTop=deckTops[di]; const dHi=deckHeights[di]; ctx.save(); dsphPill(); ctx.clip();
+        ctx.fillStyle=cs.isFlooded?'rgba(8,18,70,0.98)':stFill.nominal; ctx.fillRect(fx,dTop,fw,dHi);
+        // Per-room flood overlays are drawn in the room block loop below.
+        // Section-level overlay only shown when fully flooded.
+        if(cs.isFlooded){ ctx.fillStyle='rgba(28,75,200,0.70)'; ctx.fillRect(fx,dTop,fw,dHi); }
         ctx.restore();
     } }
 
     dsphPill(); ctx.strokeStyle='rgba(80,120,180,0.50)'; ctx.lineWidth=U(1.5); ctx.stroke();
 
     ctx.save(); dsphPill(); ctx.clip();
-    for(let ci=0;ci<6;ci++){ const comp=compKeys[ci]; const cs=cState[ci]; const cx2=compXs[ci], cw=compWs[ci]; const drenchLvl2=dmg._fireDrench?.[comp]?.level??0;
-      for(const b of (getCompLayout(comp))){ const rids=Array.isArray(b.rid)?b.rid:[b.rid]; const fire=Math.max(...rids.map(rid=>dmg.fire?.[rid]||0)); if(fire>0.02&&drenchLvl2<1){ ctx.fillStyle=`rgba(200,80,0,${(0.11+fire*0.20)*(1-drenchLvl2)})`; ctx.fillRect(cx2+cw*(b.c/3), deckTops[b.d], cw*(b.cs/3), dH*b.ds); } }
-      if(drenchLvl2>0){ const hullTop=deckTops[0], hullBot=deckTops[2]+dH; const fillH=(hullBot-hullTop)*drenchLvl2; const x0=ci===0?cx2-phR:cx2, w0=(ci===0||ci===5)?cw+phR:cw; ctx.fillStyle=`rgba(0,210,190,${0.18+drenchLvl2*0.32})`; ctx.fillRect(x0, hullBot-fillH, w0, fillH); }
+    for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci]; const _cc=getCompCols(comp); const cs=cState[ci]; const cx2=compXs[ci], cw=compWs[ci]; const drenchLvl2=dmg._fireDrench?.[comp]?.level??0;
+      for(const b of (getCompLayout(comp))){ const rids=Array.isArray(b.rid)?b.rid:[b.rid];
+        const fire=Math.max(...rids.map(rid=>_visibleFire(rid))); // only show confirmed fires
+        const roomAlarm=rids.some(rid=>_hasAlarm(rid));
+        if(fire>0.02&&drenchLvl2<1){ ctx.fillStyle=`rgba(200,80,0,${(0.11+fire*0.20)*(1-drenchLvl2)})`; ctx.fillRect(cx2+cw*(b.c/_cc), deckTops[b.d], cw*(b.cs/_cc), deckH(b.d,b.ds)); }
+        else if(roomAlarm&&drenchLvl2<1){
+          // Alarm indicator — amber pulsing border
+          const pulse=0.5+0.5*Math.sin(performance.now()*0.006);
+          ctx.strokeStyle=`rgba(255,180,0,${0.4+pulse*0.4})`; ctx.lineWidth=U(1.5);
+          const abx=cx2+cw*(b.c/_cc), aby=deckTops[b.d], abw=cw*(b.cs/_cc), abh=deckH(b.d,b.ds);
+          ctx.strokeRect(abx+1, aby+1, abw-2, abh-2);
+        }
+      }
+      if(drenchLvl2>0){ const hullTop=deckTops[0], hullBot=deckTops[numDecks-1]+dH; const fillH=(hullBot-hullTop)*drenchLvl2; const x0=ci===0?cx2-phR:cx2, w0=(ci===0||ci===compKeys.length-1)?cw+phR:cw; ctx.fillStyle=`rgba(0,210,190,${0.18+drenchLvl2*0.32})`; ctx.fillRect(x0, hullBot-fillH, w0, fillH); }
     } ctx.restore();
 
     ctx.save(); dsphPill(); ctx.clip(); ctx.strokeStyle='rgba(70,100,150,0.50)'; ctx.lineWidth=U(1);
-    for(let di=1;di<3;di++){ const y=deckTops[di]; for(let ci=0;ci<6;ci++){ const comp=compKeys[ci]; const x0=ci===0?compXs[0]-phR:compXs[ci]; const x1=ci===5?compXs[5]+compWs[5]+phR:compXs[ci]+compWs[ci]; const spans=(getCompLayout(comp)).some(b=>b.d<di && b.d+b.ds>di); if(!spans){ ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke(); } } } ctx.restore();
+    for(let di=1;di<numDecks;di++){ const y=deckTops[di]; for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci]; const _cc2=getCompCols(comp); const cx2b=compXs[ci], cwb=compWs[ci];
+      // Draw deck line in segments, skipping columns where a multi-deck room spans this boundary
+      const layout=getCompLayout(comp);
+      const spanningBlocks=layout.filter(b=>b.d<di&&b.d+b.ds>di);
+      if(spanningBlocks.length===0){
+        // No spanning rooms — draw full line
+        const x0=ci===0?compXs[0]-phR:cx2b; const x1=ci===compKeys.length-1?compXs[compKeys.length-1]+compWs[compKeys.length-1]+phR:cx2b+cwb;
+        ctx.beginPath(); ctx.moveTo(x0,y); ctx.lineTo(x1,y); ctx.stroke();
+      } else {
+        // Draw segments around spanning rooms
+        const x0=ci===0?compXs[0]-phR:cx2b; const x1=ci===compKeys.length-1?compXs[compKeys.length-1]+compWs[compKeys.length-1]+phR:cx2b+cwb;
+        let segStart=x0;
+        // Sort spanning blocks by column position
+        const sorted=[...spanningBlocks].sort((a,b2)=>a.c-b2.c);
+        for(const sb of sorted){
+          const gapX0=cx2b+cwb*(sb.c/_cc2);
+          const gapX1=cx2b+cwb*((sb.c+sb.cs)/_cc2);
+          if(segStart<gapX0){ ctx.beginPath(); ctx.moveTo(segStart,y); ctx.lineTo(gapX0,y); ctx.stroke(); }
+          segStart=gapX1;
+        }
+        if(segStart<x1){ ctx.beginPath(); ctx.moveTo(segStart,y); ctx.lineTo(x1,y); ctx.stroke(); }
+      }
+    } } ctx.restore();
 
     ctx.save(); dsphPill(); ctx.clip();
-    for(let ci=1;ci<6;ci++){ const x=compXs[ci]; const stA=DMG.effectiveState(DMG.activeSystems(compKeys[ci-1])[0],dmg)||'nominal'; const stB=DMG.effectiveState(DMG.activeSystems(compKeys[ci])[0],dmg)||'nominal'; const wDiv=Math.max(DMG.STATES.indexOf(stA),DMG.STATES.indexOf(stB)); ctx.strokeStyle=['rgba(50,120,65,0.55)','rgba(160,130,20,0.65)','rgba(160,60,20,0.75)','rgba(150,30,30,0.85)'][wDiv]||'rgba(60,90,140,0.50)'; ctx.lineWidth=U(1.5); ctx.beginPath(); ctx.moveTo(x,phTop); ctx.lineTo(x,phBot); ctx.stroke(); } ctx.restore();
+    for(let ci=1;ci<compKeys.length;ci++){ const x=compXs[ci]; const stA=DMG.effectiveState(DMG.activeSystems(compKeys[ci-1])[0],dmg)||'nominal'; const stB=DMG.effectiveState(DMG.activeSystems(compKeys[ci])[0],dmg)||'nominal'; const wDiv=Math.max(DMG.STATES.indexOf(stA),DMG.STATES.indexOf(stB)); ctx.strokeStyle=['rgba(50,120,65,0.55)','rgba(160,130,20,0.65)','rgba(160,60,20,0.75)','rgba(150,30,30,0.85)'][wDiv]||'rgba(60,90,140,0.50)'; ctx.lineWidth=U(1.5); ctx.beginPath(); ctx.moveTo(x,phTop); ctx.lineTo(x,phBot); ctx.stroke(); } ctx.restore();
 
     ctx.save(); dsphPill(); ctx.clip(); ctx.strokeStyle='rgba(50,80,120,0.40)'; ctx.lineWidth=U(0.75);
-    for(let ci=0;ci<6;ci++){ const comp=compKeys[ci]; const cx2=compXs[ci], cw=compWs[ci]; for(const b of (getCompLayout(comp))){ if(b.c+b.cs>=3) continue; const x=cx2+cw*(b.c+b.cs)/3; const y0=deckTops[b.d]+U(1); const y1=deckTops[b.d]+dH*b.ds-U(1); ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); } } ctx.restore();
+    for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci]; const _cc=getCompCols(comp); const cx2=compXs[ci], cw=compWs[ci]; for(const b of (getCompLayout(comp))){ if(b.c+b.cs>=_cc) continue; const x=cx2+cw*(b.c+b.cs)/_cc; const y0=deckTops[b.d]+U(1); const y1=deckTops[b.d]+deckH(b.d,b.ds)-U(1); ctx.beginPath(); ctx.moveTo(x,y0); ctx.lineTo(x,y1); ctx.stroke(); } } ctx.restore();
 
     { const wtd=dmg.wtd||{}; const hydOk=(dmg.systems?.hyd_main||'nominal')!=='destroyed'; const wtdBtnW=U(14), wtdBarW=U(5), wtdBarH=phBot-phTop;
       ctx.save(); dsphPill(); ctx.clip();
-      for(let ci=1;ci<=5;ci++){ const [sA,sB]=DMG.WTD_PAIRS[ci-1]; const key=sA+'|'+sB; const state=wtd[key]||'open'; const x=compXs[ci]; let barCol; if(!hydOk&&state==='open') barCol='rgba(200,160,40,0.60)'; else if(!hydOk) barCol='rgba(180,80,40,0.75)'; else if(state==='closed') barCol='rgba(180,50,30,0.80)'; else barCol='rgba(20,160,70,0.28)'; ctx.fillStyle=barCol; ctx.fillRect(x-wtdBarW*0.5, phTop, wtdBarW, wtdBarH); if(state==='closed'){ ctx.strokeStyle='rgba(255,210,190,0.88)'; ctx.lineWidth=U(1.5); const bMid=d2Top+dH*0.5; ctx.beginPath(); ctx.moveTo(x-U(5),bMid); ctx.lineTo(x+U(5),bMid); ctx.stroke(); } }
+      for(let ci=1;ci<=compKeys.length-1;ci++){ const [sA,sB]=DMG.WTD_PAIRS[ci-1]; const key=sA+'|'+sB; const state=wtd[key]||'open'; const x=compXs[ci]; let barCol; if(!hydOk&&state==='open') barCol='rgba(200,160,40,0.60)'; else if(!hydOk) barCol='rgba(180,80,40,0.75)'; else if(state==='closed') barCol='rgba(180,50,30,0.80)'; else barCol='rgba(20,160,70,0.28)'; ctx.fillStyle=barCol; ctx.fillRect(x-wtdBarW*0.5, phTop, wtdBarW, wtdBarH); if(state==='closed'){ ctx.strokeStyle='rgba(255,210,190,0.88)'; ctx.lineWidth=U(1.5); const bMid=deckTops[Math.floor(numDecks/2)]+dH*0.5; ctx.beginPath(); ctx.moveTo(x-U(5),bMid); ctx.lineTo(x+U(5),bMid); ctx.stroke(); } }
       ctx.restore();
-      for(let ci=1;ci<=5;ci++){ const [sA,sB]=DMG.WTD_PAIRS[ci-1]; const x=compXs[ci]; const _sA=sA, _sB=sB; PNL.btn2(ctx,'',x-wtdBtnW*0.5,phTop,wtdBtnW,wtdBarH,'transparent',()=>DMG.toggleWTD(_sA,_sB)); }
+      for(let ci=1;ci<=compKeys.length-1;ci++){ const [sA,sB]=DMG.WTD_PAIRS[ci-1]; const x=compXs[ci]; const _sA=sA, _sB=sB; PNL.btn2(ctx,'',x-wtdBtnW*0.5,phTop,wtdBtnW,wtdBarH,'transparent',()=>DMG.toggleWTD(_sA,_sB)); }
     }
 
     ctx.fillStyle='rgba(80,110,160,0.55)'; ctx.font=`${U(8)}px ui-monospace,monospace`; ctx.textAlign='right';
-    ctx.fillText('D1',phX0-phR-U(3),d1Top+dH*0.65); ctx.fillText('D2',phX0-phR-U(3),d2Top+dH*0.65); ctx.fillText('D3',phX0-phR-U(3),d3Top+dH*0.65);
+    for(let di=0;di<numDecks;di++) ctx.fillText(`D${di+1}`,phX0-phR-U(3),deckTops[di]+dH*0.65);
 
     ctx.save(); dsphPill(); ctx.clip();
-    for(let ci=0;ci<6;ci++){ const comp=compKeys[ci]; const cs=cState[ci]; const cx2=compXs[ci],cw=compWs[ci],cMid=cx2+cw*0.5;
-      ctx.fillStyle='rgba(200,220,255,0.92)'; ctx.font=`bold ${U(11)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText(compLabels[ci],cMid,d1Top+U(14));
-      for(const b of (getCompLayout(comp))){ const bx=cx2+cw*(b.c/3); const by=deckTops[b.d]; const bw=cw*(b.cs/3); const bh=dH*b.ds; let anyVisible=false; for(let di=b.d;di<b.d+b.ds;di++) if(deckFloodFrac(cs.flood,cs.isFlooded,di)<0.95) anyVisible=true; if(!anyVisible) continue; ctx.fillStyle='rgba(150,185,225,0.70)'; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText(b.lbl, bx+bw*0.5, by+bh*0.5); const rids=Array.isArray(b.rid)?b.rid:[b.rid]; const roomCrew=rids.reduce((sum,rid)=>(DMG.ROOMS[rid]?.crew||0)+sum,0); if(roomCrew>0){ ctx.globalAlpha=0.45; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.fillText(`crew: ${roomCrew}`, bx+bw*0.5, by+bh*0.5+U(12)); ctx.globalAlpha=1.0; } }
-      const d2Mid=d2Top+dH*0.56; const drenchLvl3=dmg._fireDrench?.[comp]?.level??0;
+    for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci]; const _cc=getCompCols(comp); const cs=cState[ci]; const cx2=compXs[ci],cw=compWs[ci],cMid=cx2+cw*0.5;
+      ctx.fillStyle='rgba(200,220,255,0.92)'; ctx.font=`bold ${U(11)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText(compLabels[ci],cMid,deckTops[0]+U(14));
+      for(const b of (getCompLayout(comp))){ const bx=cx2+cw*(b.c/_cc); const by=deckTops[b.d]; const bw=cw*(b.cs/_cc); const bh=deckH(b.d,b.ds); if(cs.isFlooded) continue; // fully flooded sections hide room blocks
+        const rids=Array.isArray(b.rid)?b.rid:[b.rid];
+        const primaryRid=rids[0];
+        const isSelected=ui.selectedWatchspace===primaryRid;
+        // Per-room flood overlay — blue fill rising from bottom of room block
+        const _roomFl=Math.max(...rids.map(rid=>dmg.roomFlood?.[rid]||0));
+        if(_roomFl>0.01){
+          const flH=bh*Math.max(_roomFl, 0.08); // minimum visible height
+          const flY=by+bh-flH;
+          const flAlpha=0.20+_roomFl*0.50; // 20% base + scales to 70%
+          ctx.fillStyle=`rgba(30,80,200,${Math.min(0.70,flAlpha)})`;
+          ctx.fillRect(bx, flY, bw, flH);
+          // Flood percentage text
+          if(_roomFl>0.05){
+            ctx.fillStyle='rgba(180,210,255,0.90)'; ctx.font=`bold ${U(8)}px ui-monospace,monospace`; ctx.textAlign='center';
+            ctx.fillText(`${Math.round(_roomFl*100)}%`, bx+bw*0.5, flY+Math.min(flH*0.7, U(10)));
+          }
+        }
+        // Selection highlight
+        if(isSelected){
+          ctx.fillStyle='rgba(60,120,200,0.25)';
+          ctx.fillRect(bx, by, bw, bh);
+          ctx.strokeStyle='rgba(100,180,255,0.70)'; ctx.lineWidth=U(1.5);
+          ctx.strokeRect(bx+1, by+1, bw-2, bh-2);
+        }
+        // Room label
+        ctx.fillStyle=isSelected?'rgba(200,225,255,0.95)':'rgba(170,200,240,0.85)'; ctx.font=`bold ${U(9)}px ui-monospace,monospace`; ctx.textAlign='center';
+        ctx.fillText(b.lbl, bx+bw*0.5, by+U(11));
+        // Crew count
+        const roomCrew=rids.reduce((sum,rid)=>(DMG.ROOMS[rid]?.crew||0)+sum,0);
+        if(roomCrew>0){ ctx.globalAlpha=0.40; ctx.font=`${U(8)}px ui-monospace,monospace`; ctx.fillText(`crew: ${roomCrew}`, bx+bw*0.5, by+U(20)); ctx.globalAlpha=1.0; }
+        // Systems in this room — multi-column layout
+        const _stCol={'nominal':'rgba(80,200,100,0.75)','degraded':'rgba(230,170,20,0.90)','offline':'rgba(230,90,30,0.90)','destroyed':'rgba(200,50,50,0.95)'};
+        const roomSys=rids.flatMap(rid=>(DMG.ROOM_SYSTEMS[rid]||[]).filter(s=>!DMG.SYS_DEF[s]?.dieselOnly||C.player.isDiesel).filter(s=>!DMG.SYS_DEF[s]?.nuclearOnly||!C.player.isDiesel));
+        if(roomSys.length>0){
+          const sysFontSz=U(8);
+          const sysLineH=U(11);
+          const sysStartY=by+U(26);
+          const sysAvailH=bh-U(28);
+          const maxRows=Math.max(1, Math.floor(sysAvailH/sysLineH));
+          const numCols=Math.ceil(roomSys.length/maxRows);
+          const colW=bw/numCols;
+          ctx.font=`${sysFontSz}px ui-monospace,monospace`; ctx.textAlign='left';
+          for(let si=0;si<roomSys.length;si++){
+            const sys=roomSys[si];
+            const col=Math.floor(si/maxRows);
+            const row=si%maxRows;
+            const st=DMG.effectiveState(sys,dmg);
+            ctx.fillStyle=_stCol[st]||_stCol.nominal;
+            const sx=bx+col*colW+U(3);
+            const sy=sysStartY+row*sysLineH;
+            ctx.fillText(DMG.SYS_LABEL[sys]||sys, sx, sy);
+          }
+        }
+        // Click region — select this watchspace
+        // Room click region — toggle watchspace selection
+        PNL.btn2(ctx,'',bx,by,bw,bh,'transparent',()=>{
+          ui.selectedWatchspace=ui.selectedWatchspace===primaryRid?null:primaryRid;
+        });
+      }
+      const d2Mid=deckTops[Math.floor(numDecks/2)]+dH*0.56; const drenchLvl3=dmg._fireDrench?.[comp]?.level??0;
       if(cs.isFlooded){ ctx.fillStyle='rgba(140,180,255,0.95)'; ctx.font=`bold ${U(11)}px ui-monospace,monospace`; ctx.fillText('FLOODED',cMid,d2Mid);
       } else if(drenchLvl3>0){ ctx.fillStyle=drenchLvl3>=1?'rgba(0,240,220,0.95)':'rgba(0,210,190,0.90)'; ctx.font=`bold ${U(10)}px ui-monospace,monospace`; ctx.fillText(`N2 ${Math.round(drenchLvl3*100)}%`,cMid,d2Mid);
-      } else if(cs.fireLevel>0.02){ const fireDi=[0,1,2].reduce((best,di)=>cs.fires[di]>cs.fires[best]?di:best,0); const fireDeckMid=deckTops[fireDi]+dH*0.56; ctx.fillStyle=cs.fireLevel>0.85?'rgba(255,80,20,0.95)':'rgba(255,140,40,0.90)'; ctx.font=`bold ${U(10)}px ui-monospace,monospace`; ctx.fillText(`FIRE ${Math.round(cs.fireLevel*100)}%`,cMid,fireDeckMid);
+      } else if(cs.fireLevel>0.02){ const fireDi=_deckRange.reduce((best,di)=>(cs.fires[di]||0)>(cs.fires[best]||0)?di:best,0); const fireDeckMid=deckTops[fireDi]+dH*0.56; ctx.fillStyle=cs.fireLevel>0.85?'rgba(255,80,20,0.95)':'rgba(255,140,40,0.90)'; ctx.font=`bold ${U(10)}px ui-monospace,monospace`; ctx.fillText(`FIRE ${Math.round(cs.fireLevel*100)}%`,cMid,fireDeckMid);
+      } else if(cs.hasAlarm){ const pulse2=0.5+0.5*Math.sin(performance.now()*0.006); ctx.fillStyle=`rgba(255,180,0,${0.6+pulse2*0.3})`; ctx.font=`bold ${U(10)}px ui-monospace,monospace`; ctx.fillText('ALARM',cMid,d2Mid);
       } else if(cs.flood>0.02){ ctx.fillStyle='rgba(140,190,255,0.90)'; ctx.font=`${U(10)}px ui-monospace,monospace`; ctx.fillText(`${Math.round(cs.flood*100)}%`,cMid,d2Mid);
-      } else if(cs.wi>0){ const stColD={degraded:'rgba(230,170,20,0.80)',offline:'rgba(230,90,30,0.85)',destroyed:'rgba(200,50,50,0.90)'}; ctx.fillStyle=stColD[cs.worst]||''; ctx.font=`bold ${U(10)}px ui-monospace,monospace`; ctx.fillText(cs.worst.toUpperCase(),cMid,d2Mid); }
+      }
     } ctx.restore();
     cy=schY+schH+U(10);
 
@@ -205,9 +415,9 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
         ctx.fillStyle='rgba(220,220,240,0.90)'; ctx.font=`bold ${U(9)}px ui-monospace,monospace`; ctx.textAlign='center';
         const pillTxt2=isMusteringEmerg2?`MSTR ${Math.ceil(team._readyT)}s`:isLocked2?team.label.replace('DC ','')+' \u{1F512}':team.label.replace('DC ','');
         ctx.fillText(pillTxt2,schX+(labelW-dispGap)/2,rowY+dispBtnH*0.68);
-        for(let ci=0;ci<6;ci++){ const comp=compKeys[ci]; const bx=compXs[ci]+dispGap/2,bw=compWs[ci]-dispGap; const lbl=compLabels[ci].slice(0,3);
+        for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci]; const bx=compXs[ci]+dispGap/2,bw=compWs[ci]-dispGap; const lbl=compLabels[ci].slice(0,3);
           const isOnScene=team.state==='on_scene'&&DMG.roomSection(team.location)===comp; const isInTransit=team.state==='transit'&&team.destination===comp; const isMustering2=team.state==='mustering'&&team.destination===comp;
-          const isFloodedD=dmg.flooded[comp]; const fireLevelD=Math.max(...(DMG.SECTION_ROOMS[comp]||[]).map(rid=>dmg.fire?.[rid]||0)),hasFireD=fireLevelD>0.02; const isDrenchedD=!!dmg._fireDrench?.[comp];
+          const isFloodedD=dmg.flooded[comp]; const fireLevelD=Math.max(...(DMG.SECTION_ROOMS[comp]||[]).map(rid=>_visibleFire(rid))),hasFireD=fireLevelD>0.02; const isDrenchedD=!!dmg._fireDrench?.[comp];
           let bCol,bLabel,clickFn;
           if(team.state==='lost'){ bCol='rgba(30,30,30,0.22)'; bLabel=lbl; clickFn=null; }
           else if(team.state==='blowing'&&DMG.roomSection(team.location)===comp){ bCol='rgba(180,90,0,0.85)'; bLabel='BLOW'; clickFn=()=>DMG.recallTeam(team.id); }
@@ -224,10 +434,158 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
         }
       } cy+=teamList2.length*(dispBtnH+dispGap+U(2))+U(6); }
 
-    const stColText={'nominal':'rgba(80,200,100,0.80)','degraded':'rgba(230,170,20,0.90)','offline':'rgba(230,90,30,0.90)','destroyed':'rgba(200,50,50,0.95)'};
-    let sysMaxY=cy;
-    for(let ci=0;ci<6;ci++){ const comp=compKeys[ci],cx2=compXs[ci],cw=compWs[ci]; const sysList=DMG.activeSystems(comp); let sy=cy; for(const sys of sysList){ const st=DMG.effectiveState(sys,dmg); ctx.fillStyle='rgba(160,180,220,0.70)'; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText(DMG.SYS_LABEL[sys]||sys,cx2+cw/2,sy); sy+=U(12); ctx.fillStyle=stColText[st]||stColText.destroyed; ctx.font=`bold ${U(9)}px ui-monospace,monospace`; ctx.fillText(st.toUpperCase(),cx2+cw/2,sy); sy+=U(10); } sysMaxY=Math.max(sysMaxY,sy); }
-    cy=sysMaxY+U(10);
+    // ── Selected watchspace detail panel ───────────────────────────────────────
+    if(ui.selectedWatchspace){
+      const selRid=ui.selectedWatchspace;
+      const selRoom=DMG.ROOMS[selRid];
+      if(selRoom){
+        const selSec=selRoom.section;
+        const selSecLabel=DMG.SECTION_LABEL[selSec]||selSec;
+        const _stColD={'nominal':'rgba(80,200,100,0.85)','degraded':'rgba(230,170,20,0.90)','offline':'rgba(230,90,30,0.90)','destroyed':'rgba(200,50,50,0.95)'};
+
+        // Panel background
+        const detY=cy; const detH=U(160); const detW=LW-P*2;
+        const detCX=P+detW*0.5; // centre X
+        ctx.fillStyle='rgba(12,20,35,0.85)';
+        ctx.strokeStyle='rgba(60,120,200,0.40)'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.roundRect(P, detY, detW, detH, U(4)); ctx.fill(); ctx.stroke();
+
+        // Room name + section
+        let dy=detY+U(16);
+        ctx.textAlign='center';
+        ctx.fillStyle='rgba(180,210,255,0.95)'; ctx.font=`bold ${U(13)}px ui-monospace,monospace`;
+        ctx.fillText(`${selRoom.label}  \u2014  ${selSecLabel}`, detCX, dy);
+
+        // Status line
+        dy+=U(18);
+        const fireLevel=_visibleFire(selRid);
+        const selAlarm=_hasAlarm(selRid);
+        const secFlooded=dmg.flooded?.[selSec];
+        const secFloodPct=dmg.flooding?.[selSec]||0;
+        const drenchLvl=dmg._fireDrench?.[selSec]?.level??0;
+        let statusText='NOMINAL', statusCol='rgba(80,200,100,0.85)';
+        if(secFlooded){ statusText='FLOODED'; statusCol='rgba(100,160,255,0.95)'; }
+        else if(drenchLvl>=1){ statusText='N2 DRENCHED \u2014 UNINHABITABLE'; statusCol='rgba(0,210,190,0.90)'; }
+        else if(fireLevel>0.5){ statusText=`FIRE \u2014 ${Math.round(fireLevel*100)}%`; statusCol='rgba(255,80,20,0.95)'; }
+        else if(fireLevel>0.02){ statusText=`FIRE \u2014 ${Math.round(fireLevel*100)}%`; statusCol='rgba(255,140,40,0.90)'; }
+        else if(selAlarm){ statusText='FIRE ALARM \u2014 INVESTIGATING'; statusCol='rgba(255,180,0,0.90)'; }
+        else if(secFloodPct>0.02){ statusText=`FLOODING \u2014 ${Math.round(secFloodPct*100)}%`; statusCol='rgba(100,160,255,0.90)'; }
+        ctx.fillStyle=statusCol; ctx.font=`bold ${U(11)}px ui-monospace,monospace`;
+        ctx.fillText(statusText, detCX, dy);
+
+        // Crew
+        dy+=U(18);
+        const allCrewInSec=dmg.crew[selSec]||[];
+        const fitInSec=allCrewInSec.filter(c=>c.status==='fit'&&!c.displaced).length;
+        const wndInSec=allCrewInSec.filter(c=>c.status==='wounded').length;
+        const kiaInSec=allCrewInSec.filter(c=>c.status==='killed').length;
+        const totalInSec=allCrewInSec.length;
+        const maxCrew=selRoom.crew||0;
+        let crewStr=`CREW:  ${fitInSec} FIT`;
+        if(wndInSec>0) crewStr+=`  ${wndInSec} WND`;
+        if(kiaInSec>0) crewStr+=`  ${kiaInSec} KIA`;
+        crewStr+=`  / ${totalInSec} in section  (watchspace capacity: ${maxCrew})`;
+        ctx.fillStyle='rgba(140,175,220,0.75)'; ctx.font=`${U(10)}px ui-monospace,monospace`;
+        ctx.fillText(crewStr, detCX, dy);
+
+        // Systems list — centred, wrapping
+        dy+=U(20);
+        const roomSysD=(DMG.ROOM_SYSTEMS[selRid]||[]).filter(s=>!DMG.SYS_DEF[s]?.dieselOnly||C.player.isDiesel).filter(s=>!DMG.SYS_DEF[s]?.nuclearOnly||!C.player.isDiesel);
+        if(roomSysD.length>0){
+          ctx.font=`${U(10)}px ui-monospace,monospace`;
+          // Build system labels with status
+          const sysItems=roomSysD.map(sys=>{
+            const st=DMG.effectiveState(sys,dmg);
+            return { label:`${DMG.SYS_LABEL[sys]||sys}: ${st.toUpperCase()}`, col:_stColD[st]||_stColD.nominal };
+          });
+          // Measure total width to see if we need multiple rows
+          const gap=U(20);
+          const widths=sysItems.map(s=>ctx.measureText(s.label).width);
+          // Lay out centred rows
+          let rowItems=[], rowW=0;
+          const maxW=detW-U(20);
+          const rows=[];
+          for(let i=0;i<sysItems.length;i++){
+            if(rowW>0&&rowW+gap+widths[i]>maxW){ rows.push(rowItems); rowItems=[]; rowW=0; }
+            rowItems.push(i);
+            rowW+=widths[i]+(rowW>0?gap:0);
+          }
+          if(rowItems.length) rows.push(rowItems);
+          for(const row of rows){
+            const totalRowW=row.reduce((s,i)=>s+widths[i],0)+(row.length-1)*gap;
+            let rx=detCX-totalRowW*0.5;
+            for(const i of row){
+              ctx.fillStyle=sysItems[i].col;
+              ctx.textAlign='left';
+              ctx.fillText(sysItems[i].label, rx, dy);
+              rx+=widths[i]+gap;
+            }
+            dy+=U(13);
+          }
+        } else {
+          ctx.fillStyle='rgba(100,130,170,0.40)'; ctx.font=`${U(10)}px ui-monospace,monospace`;
+          ctx.fillText('No systems in this watchspace', detCX, dy);
+        }
+
+        // ── DC Team dispatch/recall buttons ─────────────────────────────────
+        dy+=U(18);
+        ctx.strokeStyle='rgba(60,120,200,0.20)'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(P+U(40), dy-U(10)); ctx.lineTo(P+detW-U(40), dy-U(10)); ctx.stroke();
+
+        const teamList3=Object.values(dmg.teams||{});
+        const dcBtnW=U(120); const dcBtnH=U(20); const dcBtnGap=U(8);
+        const dcTotalW=teamList3.length*(dcBtnW+dcBtnGap)-dcBtnGap;
+        let dcX=detCX-dcTotalW*0.5;
+
+        for(const team of teamList3){
+          const teamSec=DMG.roomSection(team.location);
+          const isHere=team.state==='on_scene'&&teamSec===selSec;
+          const isTransitHere=team.state==='transit'&&team.destination===selSec;
+          const isMusterHere=team.state==='mustering'&&team.destination===selSec;
+          const isLocked=team._locked;
+          const isLost=team.state==='lost';
+          const isReady=team.state==='ready';
+          const isBusy=team.state==='on_scene'&&teamSec!==selSec;
+
+          let btnLabel, btnCol, btnAction;
+          if(isLost){
+            btnLabel=`${team.label} \u2014 LOST`; btnCol='rgba(80,30,30,0.60)'; btnAction=null;
+          } else if(isHere){
+            btnLabel=`${team.label} ON SCENE \u2014 RECALL`; btnCol='rgba(30,100,50,0.80)';
+            btnAction=()=>DMG.recallTeam(team.id);
+          } else if(isTransitHere||isMusterHere){
+            const eta=isTransitHere?Math.ceil(team.transitEta):Math.ceil(team.musterT||0);
+            btnLabel=`${team.label} INBOUND (${eta}s) \u2014 RECALL`; btnCol='rgba(160,110,15,0.80)';
+            btnAction=()=>DMG.recallTeam(team.id);
+          } else if(isLocked){
+            btnLabel=`${team.label} \uD83D\uDD12 LOCKED`; btnCol='rgba(60,60,70,0.60)'; btnAction=null;
+          } else if(isBusy){
+            btnLabel=`${team.label} \u2014 REDIRECT HERE`; btnCol='rgba(25,60,130,0.75)';
+            btnAction=()=>DMG.assignTeam(team.id,selSec);
+          } else if(isReady){
+            btnLabel=`${team.label} \u2014 DISPATCH`; btnCol='rgba(25,70,140,0.80)';
+            btnAction=()=>DMG.assignTeam(team.id,selSec);
+          } else {
+            btnLabel=`${team.label} \u2014 DISPATCH`; btnCol='rgba(25,60,120,0.65)';
+            btnAction=()=>DMG.assignTeam(team.id,selSec);
+          }
+
+          // Widen buttons to fit label
+          const labelW2=Math.max(dcBtnW, ctx.measureText(btnLabel).width+U(16));
+          PNL.btn2(ctx, btnLabel, dcX, dy-U(4), labelW2, dcBtnH, btnCol, btnAction||(()=>{}));
+          dcX+=labelW2+dcBtnGap;
+        }
+        dy+=dcBtnH+U(8);
+
+        // Resize panel to fit content
+        const actualDetH=dy-detY+U(6);
+        // Redraw background at correct height (overdraw)
+        ctx.fillStyle='rgba(12,20,35,0.85)';
+        ctx.strokeStyle='rgba(60,120,200,0.40)'; ctx.lineWidth=1;
+        // We can't resize retroactively, but we set cy based on actual content
+        cy=detY+Math.max(detH, actualDetH)+U(6);
+      }
+    }
 
     ctx.fillStyle='rgba(120,140,180,0.50)'; ctx.font=`${U(10)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('ESCAPE',P,cy); cy+=U(6);
     const halfEsc=(LW-P*2-U(6))/2; const tceViable=DMG.canTCE(),escActive=!!dmg.escapeState;
@@ -238,9 +596,9 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
     ctx.fillStyle=depthAdvCol; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText(`${depthM}m \u2014 ${depthAdv}`,LW/2,cy+U(30)); cy+=U(36);
 
     const hasSealTargets=DMG.COMPS.some(comp=>!dmg.flooded[comp]&&(dmg.flooding[comp]||0)>0.05);
-    if(hasSealTargets){ ctx.fillStyle='rgba(80,100,140,0.40)'; ctx.font=`${U(8)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('SEAL (last resort \u2014 kills all crew inside):',P,cy); cy+=U(6); for(let ci=0;ci<6;ci++){ const comp=compKeys[ci],cx2=compXs[ci],cw=compWs[ci]; if(!dmg.flooded[comp]&&(dmg.flooding[comp]||0)>0.05) PNL.btn2(ctx,compLabels[ci].slice(0,3),cx2+2,cy,cw-4,U(14),'rgba(100,30,30,0.60)',()=>DMG.sealFlooding(comp)); } cy+=U(18); }
+    if(hasSealTargets){ ctx.fillStyle='rgba(80,100,140,0.40)'; ctx.font=`${U(8)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('SEAL (last resort \u2014 kills all crew inside):',P,cy); cy+=U(6); for(let ci=0;ci<compKeys.length;ci++){ const comp=compKeys[ci],cx2=compXs[ci],cw=compWs[ci]; if(!dmg.flooded[comp]&&(dmg.flooding[comp]||0)>0.05) PNL.btn2(ctx,compLabels[ci].slice(0,3),cx2+2,cy,cw-4,U(14),'rgba(100,30,30,0.60)',()=>DMG.sealFlooding(comp)); } cy+=U(18); }
 
-    if(session.debugOverlay){ ctx.fillStyle='rgba(200,50,50,0.60)'; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('[ DEBUG ] HIT:',P,cy-U(2)); const dbgW=(LW-P*2-U(4))/6; for(let i=0;i<6;i++){ const comp=DMG.COMPS[i],isHit=(dmg.strikes[comp]||0)>=1; PNL.btn2(ctx,compLabels[i].slice(0,3),P+i*dbgW,cy,dbgW-U(3),U(14),isHit?'rgba(180,30,30,0.80)':'rgba(100,30,30,0.55)',()=>DMG.hit(55,null,null,comp)); } }
+    if(session.debugOverlay){ ctx.fillStyle='rgba(200,50,50,0.60)'; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('[ DEBUG ] HIT:',P,cy-U(2)); const dbgW=(LW-P*2-U(4))/compKeys.length; for(let i=0;i<compKeys.length;i++){ const comp=DMG.COMPS[i],isHit=(dmg.strikes[comp]||0)>=1; PNL.btn2(ctx,compLabels[i].slice(0,3),P+i*dbgW,cy,dbgW-U(3),U(14),isHit?'rgba(180,30,30,0.80)':'rgba(100,30,30,0.55)',()=>DMG.hit(55,null,null,comp)); } }
 
     const SPLIT_Y=Math.min(cy+U(4), Math.round(H*0.74));
     ctx.strokeStyle='rgba(60,100,160,0.30)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,SPLIT_Y); ctx.lineTo(W,SPLIT_Y); ctx.stroke();
@@ -252,8 +610,8 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
     ctx.fillStyle='rgba(60,200,90,0.85)'; ctx.fillText(`FIT ${fit}`,sumX,ry2); ctx.fillStyle='rgba(230,170,30,0.90)'; ctx.fillText(`WND ${wnd}`,sumX+U(56),ry2); ctx.fillStyle='rgba(210,50,50,0.90)'; ctx.fillText(`KIA ${kia}`,sumX+U(112),ry2); ctx.fillStyle='rgba(140,165,210,0.55)'; ctx.fillText(`/ ${total}`,sumX+U(168),ry2);
     ry2+=U(16); ctx.strokeStyle='rgba(60,100,160,0.20)'; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(P,ry2); ctx.lineTo(W-P,ry2); ctx.stroke(); ry2+=U(8);
 
-    const nCols2=6, colGap2=U(6); const colW2=(W-P*2-colGap2*(nCols2-1))/nCols2;
-    const COMP_LABELS2={fore_ends:'TORPEDO ROOM',control_room:'CONTROL ROOM',aux_section:'AUX / MESS',reactor_comp:'REACTOR COMP',engine_room:'ENGINE ROOM',aft_ends:'AFT ENDS'};
+    const nCols2=compKeys.length, colGap2=U(6); const colW2=(W-P*2-colGap2*(nCols2-1))/nCols2;
+    const COMP_LABELS2={fore_ends:'TORPEDO ROOM',control_room:'CONTROL ROOM',aux_section:'AUX / MESS',reactor_comp:'REACTOR COMP',engine_room:'ENGINE ROOM',aft_ends:'AFT ENDS',forward:'FORWARD',reactor:'REACTOR',engineering:'ENGINEERING',midships:'MIDSHIPS',aft:'AFT'};
     const SUPPORT_DEPTS2=new Set(['medical','supply']); const ROW_H2=U(13), SEC_HDR2=U(18);
     const STATUS_COL2={fit:'rgba(50,190,80,0.90)',wounded:'rgba(230,165,25,0.90)',killed:'rgba(200,40,40,0.75)'};
     const _hoverHits2=[]; const mx2=L.I?.mouseX||0, my2=L.I?.mouseY||0;
@@ -264,7 +622,7 @@ import { clamp, player, session, ui, L, C } from './panel-context.js';
 
     function drawSupportSection2(sx,sy,availW){ const allSupport2=[]; for(const comp of DMG.COMPS){ for(const m of (d.crew[comp]||[])) if(SUPPORT_DEPTS2.has(m.dept)) allSupport2.push(m); } if(allSupport2.length===0) return sy; const fitC2=allSupport2.filter(c=>c.status==='fit').length; const kiaC2=allSupport2.filter(c=>c.status==='killed').length; ctx.fillStyle='rgba(20,38,70,0.60)'; ctx.beginPath(); ctx.roundRect(sx,sy,availW,SEC_HDR2,U(2)); ctx.fill(); ctx.fillStyle='rgba(180,210,255,0.90)'; ctx.font=`bold ${U(10)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('SHIP SUPPORT',sx+U(5),sy+SEC_HDR2*0.72); ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='right'; ctx.fillStyle=kiaC2>0?'rgba(210,60,60,0.85)':'rgba(80,190,100,0.70)'; ctx.fillText(`${fitC2}/${allSupport2.length}`,sx+availW-U(5),sy+SEC_HDR2*0.72); sy+=SEC_HDR2+U(2); for(const dept of ['medical','supply']){ const crew2=allSupport2.filter(m=>m.dept===dept); if(crew2.length===0) continue; ctx.fillStyle='rgba(100,130,180,0.50)'; ctx.font=`bold ${U(7)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText(dept==='medical'?'MEDICAL':'SUPPLY',sx+U(5),sy+U(7)); sy+=U(10); const dutyList2=crew2.filter(m=>m.watch==='duty'); const watchB2=crew2.filter(m=>m.watch==='B'), watchA2=crew2.filter(m=>m.watch==='A'); const subW2=(availW-U(3))/2; for(let i=0;i<dutyList2.length;i++){ ctx.fillStyle='rgba(140,110,10,0.12)'; ctx.fillRect(sx,sy+i*ROW_H2,availW,ROW_H2-1); drawCrewRow2(dutyList2[i],sx,sy+i*ROW_H2+ROW_H2*0.82,availW,true); } if(dutyList2.length) sy+=dutyList2.length*ROW_H2+U(2); const rows2=Math.max(watchB2.length,watchA2.length); for(let i=0;i<watchB2.length;i++) drawCrewRow2(watchB2[i],sx,sy+i*ROW_H2+ROW_H2*0.82,subW2,false); for(let i=0;i<watchA2.length;i++) drawCrewRow2(watchA2[i],sx+subW2+U(3),sy+i*ROW_H2+ROW_H2*0.82,subW2,false); sy+=rows2*ROW_H2+U(4); } return sy+U(2); }
 
-    for(let ci=0;ci<6;ci++){ const comp=DMG.COMPS[ci]; const cx3=P+ci*(colW2+colGap2); const colEnd=drawCompSection2(comp,cx3,ry2,colW2); if(ci===5) drawSupportSection2(cx3,colEnd+U(4),colW2); }
+    for(let ci=0;ci<compKeys.length;ci++){ const comp=DMG.COMPS[ci]; const cx3=P+ci*(colW2+colGap2); const colEnd=drawCompSection2(comp,cx3,ry2,colW2); if(ci===compKeys.length-1) drawSupportSection2(cx3,colEnd+U(4),colW2); }
     ctx.restore();
 
     for(const h of _hoverHits2){ if(mx2>=h.x&&mx2<=h.x+h.w&&my2>=h.y&&my2<=h.y+h.h){ const tip=h.tip; ctx.font=`${U(11)}px ui-monospace,monospace`; const tw=ctx.measureText(tip).width+U(12), th=U(16); let tx2=mx2+U(10), ty2=my2-U(4); if(tx2+tw>W) tx2=mx2-tw-U(4); if(ty2+th>H) ty2=my2-th-U(4); ctx.fillStyle='rgba(5,12,30,0.94)'; ctx.strokeStyle='rgba(80,140,220,0.55)'; ctx.lineWidth=1; ctx.beginPath(); ctx.roundRect(tx2,ty2,tw,th,U(3)); ctx.fill(); ctx.stroke(); ctx.fillStyle='rgba(200,220,255,0.95)'; ctx.textAlign='left'; ctx.fillText(tip,tx2+U(6),ty2+th*0.72); break; } }

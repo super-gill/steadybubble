@@ -2,6 +2,7 @@
 'use strict';
 
 import { CONFIG, session, ui, L, C } from './panel-context.js';
+import { setLayout } from '../../systems/damage/damage-data.js';
 
   export function drawStartScreen(W,H){
     const ctx = L.ctx;
@@ -25,13 +26,14 @@ import { CONFIG, session, ui, L, C } from './panel-context.js';
     const t0=performance.now()*0.0003;
     function drawVesselSilhouette(key,cW,cH,sel){
       const shapes={
+        '688':      {ax:0.84,bR:1.00,ss:0.82,sf:0.32,sW:0.080,sH:1.80,hw:1.00,rk:true, bp:true, st:'screw'},
         '688i':     {ax:0.84,bR:1.00,ss:0.82,sf:0.32,sW:0.080,sH:1.80,hw:1.00,rk:true, bp:true, st:'screw'},
         'trafalgar':{ax:0.78,bR:1.10,ss:0.80,sf:0.33,sW:0.090,sH:1.65,hw:1.00,rk:true, bp:true, st:'pumpjet'},
         'swiftsure':{ax:0.73,bR:1.15,ss:0.78,sf:0.35,sW:0.100,sH:1.90,hw:1.00,rk:false,bp:true, st:'pumpjet'},
         'seawolf':  {ax:0.67,bR:1.42,ss:0.85,sf:0.31,sW:0.115,sH:1.55,hw:1.30,rk:true, bp:false,st:'screw'},
         'type209':  {ax:0.56,bR:0.82,ss:0.76,sf:0.43,sW:0.070,sH:1.25,hw:0.75,rk:false,bp:false,st:'screw'},
       };
-      const sp=shapes[key]||shapes['688i'];
+      const sp=shapes[key]||shapes['688'];
       const al=sel?0.90:0.20; const lw=sel?2.2:1.0;
       const L2=cW*0.46*sp.ax; const Hw=L2*0.15*sp.hw;
       if(sel){ctx.shadowColor='rgba(100,200,255,0.55)';ctx.shadowBlur=U(12);}
@@ -79,7 +81,7 @@ import { CONFIG, session, ui, L, C } from './panel-context.js';
       const selScenTitle=scenTitles[session.scenario]||'SELECT SCENARIO';
       const tab=ui.vesselTab||'player';
       const presets=CONFIG.playerPresets||[];
-      const selKey=session.vesselKey||'688i';
+      const selKey=session.vesselKey||'688';
       const selPreset=presets.find(p=>p.key===selKey)||presets[0];
 
       // Header bar
@@ -106,17 +108,29 @@ import { CONFIG, session, ui, L, C } from './panel-context.js';
       ctx.fillStyle='#ffffff';ctx.font=`bold ${U(13)}px ui-monospace,monospace`;ctx.textAlign='center';
       ctx.fillText('DIVE \u2014 BEGIN MISSION',diveX+diveW/2,diveY+diveH*0.68);
       L.PANEL?.btn2(ctx,'',diveX,diveY,diveW,diveH,'transparent',()=>{
-        const vk=session.vesselKey||'688i';const prs=CONFIG.playerPresets||[];
+        // Merge vessel preset into CONFIG.player before loadout screen
+        const vk=session.vesselKey||'688';const prs=CONFIG.playerPresets||[];
         const preset=prs.find(p=>p.key===vk)||prs[0];
         if(preset){
-          // Merge preset into CONFIG.player — preserves base properties (e.g. casualty configs)
-          // that aren't overridden by the vessel preset
           const baseCasualties=CONFIG.player.casualties;
           Object.assign(CONFIG.player, preset);
-          // Deep-merge casualties so vessel-specific overrides don't clobber new casualty types
           if(baseCasualties) CONFIG.player.casualties=Object.assign({}, baseCasualties, preset.casualties||{});
         }
-        session.started=true;session.scenario=session.scenario||'waves';L.SIM?.resetScenario(session.scenario);
+        // NOTE: setLayout() is NOT called here — it runs on mission start (DIVE from loadout)
+        // to avoid changing the active damage layout while the game loop is still running
+        // Build default loadout from vessel config
+        const nTubes=CONFIG.player.torpTubes||4;
+        const rackCap=CONFIG.player.magazineRack||(CONFIG.player.torpStock||12);
+        const torpKey=CONFIG.player.torpWeapon||'mk48_adcap';
+        const missileTypes=CONFIG.player.missileTypes||[];
+        const defaultMissiles=CONFIG.player.missileStock||0;
+        const rack={};
+        rack[torpKey]=Math.max(0, rackCap-defaultMissiles);
+        if(missileTypes.length>0&&defaultMissiles>0) rack[missileTypes[0]]=defaultMissiles;
+        const tubes=new Array(nTubes).fill(torpKey);
+        const vlsWeapon=CONFIG.player.vlsWeapon||null;
+        session.loadout={ rack, tubes, vls:vlsWeapon };
+        ui.startPhase='loadout';
       });
 
       // Tab bar
@@ -231,6 +245,224 @@ import { CONFIG, session, ui, L, C } from './panel-context.js';
           ctx.fillStyle='rgba(80,150,220,0.55)';ctx.beginPath();ctx.roundRect(W-U(8),tmbY,U(4),tmbH,U(2));ctx.fill();
         }
       }
+      return;
+    }
+
+    // ── LOADOUT SCREEN ───────────────────────────────────────────────────────
+    if((ui.startPhase||'scenario')==='loadout'&&session.loadout){
+      const lo=session.loadout;
+      const torpKey=CONFIG.player.torpWeapon||'mk48_adcap';
+      const missileTypes=CONFIG.player.missileTypes||[];
+      const nTubes=CONFIG.player.torpTubes||4;
+      const rackCap=CONFIG.player.magazineRack||(CONFIG.player.torpStock||12);
+      const vlsCells=CONFIG.player.vlsCells||0;
+      const vlsWeapon=CONFIG.player.vlsWeapon||null;
+      const allWeapons=CONFIG.weapons||{};
+
+      // All valid rack weapon keys for this vessel (torpedo + tube-launched missiles)
+      const rackWeaponKeys=[torpKey, ...missileTypes];
+      const rackTotal=rackWeaponKeys.reduce((s,k)=>(lo.rack[k]||0)+s,0);
+
+      // Header
+      const hdrH=U(54);
+      ctx.fillStyle='rgba(8,18,36,0.96)'; ctx.fillRect(0,0,W,hdrH);
+      ctx.strokeStyle='rgba(40,90,160,0.30)'; ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(0,hdrH);ctx.lineTo(W,hdrH);ctx.stroke();
+
+      // Back button
+      const backW2=U(150),backH2=U(36),backX2=U(20),backY2=(hdrH-backH2)/2;
+      ctx.fillStyle='rgba(18,48,90,0.75)';ctx.strokeStyle='rgba(60,120,200,0.45)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.roundRect(backX2,backY2,backW2,backH2,U(4));ctx.fill();ctx.stroke();
+      ctx.fillStyle='rgba(120,180,240,0.85)';ctx.font=`${U(13)}px ui-monospace,monospace`;ctx.textAlign='center';
+      ctx.fillText('\u2190 VESSEL',backX2+backW2/2,backY2+backH2*0.68);
+      L.PANEL?.btn2(ctx,'',backX2,backY2,backW2,backH2,'transparent',()=>{ ui.startPhase='vessel'; session.loadout=null; });
+
+      // Title
+      const vesselName=CONFIG.player.name||'SUBMARINE';
+      ctx.fillStyle='rgba(140,190,235,0.55)';ctx.font=`${U(13)}px ui-monospace,monospace`;ctx.textAlign='center';
+      ctx.letterSpacing='2px';ctx.fillText(`${vesselName}  \u00b7  CONFIGURE LOADOUT`,W/2,hdrH*0.62);ctx.letterSpacing='0px';
+
+      // Dive button
+      const diveW2=U(190),diveH2=U(36),diveX2=W-diveW2-U(20),diveY2=(hdrH-diveH2)/2;
+      const rackValid=rackTotal===rackCap;
+      ctx.fillStyle=rackValid?'rgba(22,90,150,0.90)':'rgba(60,60,70,0.50)';
+      ctx.strokeStyle=rackValid?'rgba(80,180,255,0.70)':'rgba(80,80,90,0.30)';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.roundRect(diveX2,diveY2,diveW2,diveH2,U(4));ctx.fill();ctx.stroke();
+      ctx.fillStyle=rackValid?'#ffffff':'rgba(140,140,150,0.50)';ctx.font=`bold ${U(13)}px ui-monospace,monospace`;ctx.textAlign='center';
+      ctx.fillText('DIVE \u2014 BEGIN MISSION',diveX2+diveW2/2,diveY2+diveH2*0.68);
+      if(rackValid){
+        L.PANEL?.btn2(ctx,'',diveX2,diveY2,diveW2,diveH2,'transparent',()=>{
+          // Load vessel layout NOW (just before mission start, not on loadout screen entry)
+          setLayout(session.vesselKey||'688');
+          session.started=true;session.scenario=session.scenario||'waves';L.SIM?.resetScenario(session.scenario);
+        });
+      }
+
+      // Hover tooltip system
+      const _hoverRegions=[];
+      const mx=L.I?.mouseX||0, my=L.I?.mouseY||0;
+
+      let cy2=hdrH+U(24);
+      const colW2=W*0.42;
+      const cx1=W*0.28, cx2=W*0.72; // centres for two columns
+
+      // ── MAGAZINE RACK ─────────────────────────────────────────────────────
+      ctx.fillStyle='rgba(180,210,255,0.90)';ctx.font=`bold ${U(14)}px ui-monospace,monospace`;ctx.textAlign='center';
+      ctx.fillText('MAGAZINE RACK',cx1,cy2);
+      ctx.fillStyle='rgba(110,140,180,0.55)';ctx.font=`${U(10)}px ui-monospace,monospace`;
+      ctx.fillText(`${rackTotal} / ${rackCap} slots`,cx1,cy2+U(16));
+      if(!rackValid){ ctx.fillStyle='rgba(255,100,60,0.85)';ctx.fillText(rackTotal<rackCap?'SLOTS REMAINING':'OVER CAPACITY',cx1,cy2+U(28)); }
+
+      let ry=cy2+U(40);
+      const rowH=U(36);const btnW=U(36);const btnH=U(28);
+      for(const wk of rackWeaponKeys){
+        const wDef=allWeapons[wk];
+        const rawLabel=wDef?.shortLabel||wDef?.label||wk.toUpperCase();
+        const label=wDef?.placeholder?rawLabel+' [NYI]':rawLabel;
+        const kind=wDef?.kind||'torpedo';
+        const count=lo.rack[wk]||0;
+        const kindCol=kind==='torpedo'?'rgba(80,200,100,0.85)':wDef?.placeholder?'rgba(140,130,80,0.65)':'rgba(200,160,60,0.85)';
+
+        // Label + hover region
+        ctx.fillStyle=kindCol;ctx.font=`bold ${U(11)}px ui-monospace,monospace`;ctx.textAlign='left';
+        ctx.fillText(label,cx1-colW2*0.45,ry+rowH*0.45);
+        _hoverRegions.push({x:cx1-colW2*0.45, y:ry, w:colW2*0.45, h:rowH, wk});
+
+        // - button
+        const minusX=cx1-U(10);
+        ctx.fillStyle=count>0?'rgba(180,60,60,0.75)':'rgba(50,50,55,0.40)';
+        ctx.beginPath();ctx.roundRect(minusX,ry+(rowH-btnH)/2,btnW,btnH,U(3));ctx.fill();
+        ctx.fillStyle=count>0?'#fff':'rgba(120,120,130,0.40)';ctx.font=`bold ${U(16)}px ui-monospace,monospace`;ctx.textAlign='center';
+        ctx.fillText('\u2212',minusX+btnW/2,ry+rowH*0.55);
+        if(count>0) L.PANEL?.btn2(ctx,'',minusX,ry+(rowH-btnH)/2,btnW,btnH,'transparent',()=>{ lo.rack[wk]=Math.max(0,(lo.rack[wk]||0)-1); });
+
+        // Count (between buttons)
+        ctx.fillStyle='rgba(220,235,255,0.95)';ctx.font=`bold ${U(16)}px ui-monospace,monospace`;ctx.textAlign='center';
+        ctx.fillText(String(count),cx1+U(46),ry+rowH*0.52);
+
+        // + button
+        const plusX=cx1+U(66);
+        const canAdd=rackTotal<rackCap;
+        ctx.fillStyle=canAdd?'rgba(40,120,80,0.75)':'rgba(50,50,55,0.40)';
+        ctx.beginPath();ctx.roundRect(plusX,ry+(rowH-btnH)/2,btnW,btnH,U(3));ctx.fill();
+        ctx.fillStyle=canAdd?'#fff':'rgba(120,120,130,0.40)';ctx.font=`bold ${U(16)}px ui-monospace,monospace`;
+        ctx.fillText('+',plusX+btnW/2,ry+rowH*0.55);
+        if(canAdd) L.PANEL?.btn2(ctx,'',plusX,ry+(rowH-btnH)/2,btnW,btnH,'transparent',()=>{ lo.rack[wk]=(lo.rack[wk]||0)+1; });
+
+        ry+=rowH;
+      }
+
+      // ── TORPEDO TUBES ─────────────────────────────────────────────────────
+      let ty=cy2;
+      ctx.fillStyle='rgba(180,210,255,0.90)';ctx.font=`bold ${U(14)}px ui-monospace,monospace`;ctx.textAlign='center';
+      ctx.fillText('TORPEDO TUBES',cx2,ty);
+      ctx.fillStyle='rgba(110,140,180,0.55)';ctx.font=`${U(10)}px ui-monospace,monospace`;
+      ctx.fillText(`${nTubes} tubes \u2014 all pre-loaded`,cx2,ty+U(16));
+      ty+=U(40);
+
+      const tubeRowH=U(40);const tubeBtnW=U(90);const tubeBtnH=U(28);
+      // Available tube weapons: torpedo + tube-launched missiles
+      const tubeWeaponOptions=[torpKey, ...missileTypes];
+
+      for(let ti=0;ti<nTubes;ti++){
+        const currentWk=lo.tubes[ti]||torpKey;
+        const wDef=allWeapons[currentWk];
+        const rawLabel2=wDef?.shortLabel||currentWk.toUpperCase();
+        const label=wDef?.placeholder?rawLabel2+' [NYI]':rawLabel2;
+        const kind=wDef?.kind||'torpedo';
+        const kindCol=kind==='torpedo'?'rgba(80,200,100,0.85)':'rgba(200,160,60,0.85)';
+
+        // Tube label
+        ctx.fillStyle='rgba(140,170,210,0.70)';ctx.font=`${U(10)}px ui-monospace,monospace`;ctx.textAlign='left';
+        ctx.fillText(`TUBE ${ti+1}`,cx2-colW2*0.40,ty+tubeRowH*0.45);
+
+        // Weapon buttons — cycle through options
+        const bx=cx2-tubeBtnW*0.5;
+        ctx.fillStyle=kindCol; ctx.globalAlpha=0.20;
+        ctx.beginPath();ctx.roundRect(bx,ty+(tubeRowH-tubeBtnH)/2,tubeBtnW,tubeBtnH,U(3));ctx.fill();
+        ctx.globalAlpha=1.0;
+        ctx.fillStyle=kindCol;ctx.font=`bold ${U(11)}px ui-monospace,monospace`;ctx.textAlign='center';
+        ctx.fillText(label,cx2,ty+tubeRowH*0.52);
+
+        // Hover region for tooltip
+        _hoverRegions.push({x:bx, y:ty+(tubeRowH-tubeBtnH)/2, w:tubeBtnW, h:tubeBtnH, wk:currentWk});
+
+        // Click cycles to next weapon option
+        const _ti=ti;
+        L.PANEL?.btn2(ctx,'',bx,ty+(tubeRowH-tubeBtnH)/2,tubeBtnW,tubeBtnH,'transparent',()=>{
+          const curIdx=tubeWeaponOptions.indexOf(lo.tubes[_ti]);
+          lo.tubes[_ti]=tubeWeaponOptions[(curIdx+1)%tubeWeaponOptions.length];
+        });
+
+        ty+=tubeRowH;
+      }
+
+      // ── VLS (if applicable) ───────────────────────────────────────────────
+      if(vlsCells>0){
+        ty+=U(16);
+        ctx.fillStyle='rgba(180,210,255,0.90)';ctx.font=`bold ${U(14)}px ui-monospace,monospace`;ctx.textAlign='center';
+        ctx.fillText('VERTICAL LAUNCH SYSTEM',cx2,ty);
+        ty+=U(18);
+        const vlsLabel=allWeapons[vlsWeapon]?.shortLabel||vlsWeapon?.toUpperCase()||'N/A';
+        ctx.fillStyle='rgba(200,160,60,0.85)';ctx.font=`${U(11)}px ui-monospace,monospace`;
+        ctx.fillText(`${vlsCells} x ${vlsLabel}`,cx2,ty);
+        ctx.fillStyle='rgba(110,140,180,0.40)';ctx.font=`${U(9)}px ui-monospace,monospace`;
+        ty+=U(14);
+        ctx.fillText('VLS loadout is fixed for this vessel',cx2,ty);
+      }
+
+      // ── Weapon tooltip on hover ─────────────────────────────────────────
+      for(const hr of _hoverRegions){
+        if(mx>=hr.x&&mx<=hr.x+hr.w&&my>=hr.y&&my<=hr.y+hr.h){
+          const wd=allWeapons[hr.wk];
+          if(!wd) break;
+          const lines=[];
+          lines.push(wd.label||(wd.shortLabel||hr.wk).toUpperCase());
+          if(wd.role) lines.push(wd.role);
+          if(wd.desc) lines.push('');
+          if(wd.desc) lines.push(wd.desc);
+          // Stats
+          const stats=[];
+          if(wd.speed) stats.push(`Speed: ${wd.speed} kt`);
+          if(wd.range&&wd.range<900000) stats.push(`Range: ${Math.round(wd.range/100)/10} km`);
+          if(wd.dmg) stats.push(`Damage: ${wd.dmg}`);
+          if(wd.warheadDmg) stats.push(`Warhead: ${wd.warheadDmg}`);
+          if(wd.seekRange) stats.push(`Seeker: ${wd.seekRange}m`);
+          if(wd.maxLaunchDepth) stats.push(`Max launch depth: ${wd.maxLaunchDepth}m`);
+          if(stats.length>0){ lines.push(''); lines.push(stats.join('  \u00b7  ')); }
+          if(wd.placeholder) lines.push('[NOT YET IMPLEMENTED]');
+
+          const tipFont=U(10);
+          const tipPad=U(8);
+          ctx.font=`${tipFont}px ui-monospace,monospace`;
+          const lineWidths=lines.map(l=>ctx.measureText(l).width);
+          const tipW=Math.max(...lineWidths)+tipPad*2;
+          const lineH=U(14);
+          const tipH=lines.length*lineH+tipPad*2;
+
+          let tx=mx+U(14), ty2=my-tipH/2;
+          if(tx+tipW>W-U(10)) tx=mx-tipW-U(14);
+          if(ty2<U(10)) ty2=U(10);
+          if(ty2+tipH>H-U(10)) ty2=H-tipH-U(10);
+
+          ctx.fillStyle='rgba(5,12,28,0.95)';
+          ctx.strokeStyle='rgba(60,120,200,0.55)';
+          ctx.lineWidth=1;
+          ctx.beginPath();ctx.roundRect(tx,ty2,tipW,tipH,U(4));ctx.fill();ctx.stroke();
+
+          ctx.textAlign='left';
+          for(let li=0;li<lines.length;li++){
+            const ly=ty2+tipPad+li*lineH+lineH*0.75;
+            if(li===0){ ctx.fillStyle='rgba(200,225,255,0.95)';ctx.font=`bold ${tipFont}px ui-monospace,monospace`; }
+            else if(li===1&&wd.role){ ctx.fillStyle='rgba(140,180,220,0.75)';ctx.font=`${tipFont}px ui-monospace,monospace`; }
+            else if(lines[li]==='[NOT YET IMPLEMENTED]'){ ctx.fillStyle='rgba(255,140,60,0.80)';ctx.font=`bold ${tipFont}px ui-monospace,monospace`; }
+            else { ctx.fillStyle='rgba(160,185,220,0.70)';ctx.font=`${tipFont}px ui-monospace,monospace`; }
+            ctx.fillText(lines[li],tx+tipPad,ly);
+          }
+          break;
+        }
+      }
+
       return;
     }
 

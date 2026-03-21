@@ -1,6 +1,6 @@
 'use strict';
 
-import { CONFIG } from '../config/constants.js';
+import { CONFIG, isTorpLoad } from '../config/constants.js';
 import { rand, clamp, angleNorm } from '../utils/math.js';
 import { player, enemies, bullets, contacts, sonarContacts,
          missiles, tdc, decoys } from '../state/sim-state.js';
@@ -41,20 +41,18 @@ export function bindPlayerControl(deps) {
 // Returns tube index or -1.
 function reserveTube(){
   const tubes=player.torpTubes;
-  const stock=player.torpStock;
   if(!tubes||tubes.length===0) return -1;
-  if(typeof stock!=='number'||stock<=0) return -1;
   // Only scan up to tubesAvail -- damaged tubes are unavailable
   const avail=_DMG.getEffects().tubesAvail??tubes.length;
   let ready=-1;
   const tubeLoad=player.tubeLoad||[];
   for(let i=0;i<Math.min(tubes.length,avail);i++){
-    if(tubes[i]===0 && (tubeLoad[i]==null||tubeLoad[i]==='torp')){ready=i;break;}
+    if(tubes[i]===0 && isTorpLoad(tubeLoad[i])){ready=i;break;}
   }
   if(ready<0) return -1;
-  // Tube stays at -1 (wire-occupied) until wire breaks; non-wire starts reload now
+  // Fire the tube — torpedo is already loaded, no rack stock needed to fire.
+  // Rack stock is only consumed on RELOAD (handled by _orderLoad).
   tubes[ready]=-1; // will be set to reloadTime or by _onWireCut
-  player.torpStock=stock-1;
   return ready;
 }
 
@@ -71,17 +69,16 @@ function reserveSpecificTube(idx){
   if(tubes[idx]>0){ return {idx:-1,reason:'reloading'}; }
   const load=tubeLoad[idx];
   if(load===null||load===undefined){ return {idx:-1,reason:'empty'}; }
-  if(load!=='torp'){ return {idx:-1,reason:'missile'}; }
-  if((player.torpStock||0)<=0){ return {idx:-1,reason:'empty'}; }
+  if(!isTorpLoad(load)){ return {idx:-1,reason:'missile'}; }
+  // Tube is loaded — fire it. No rack stock check needed (torpedo is already in the tube).
   tubes[idx]=-1;
-  player.torpStock--;
   return {idx,reason:'ok'};
 }
 
 // Returns the weapon label for a tube (for FPP comms)
 function tubeWeaponLabel(tubeIdx){
   const load=(player.tubeLoad||[])[tubeIdx];
-  if(!load||load==='torp') return C.weapons?.[C.player.torpWeapon]?.shortLabel||'TORPEDO';
+  if(isTorpLoad(load)) return C.weapons?.[C.player.torpWeapon]?.shortLabel||'TORPEDO';
   return C.weapons?.[load]?.shortLabel||load.toUpperCase();
 }
 
@@ -112,16 +109,15 @@ function _orderLoad(tubeIdx,weaponKey){
   if(tubes[t]===-1){ _COMMS.weapons.error('Wire live \u2014 cut first'); return; }
   if(tubes[t]>0){ _COMMS.weapons.error('Tube loading'); return; }
   if(player.tubeLoad?.[t]!=null){ _COMMS.weapons.error('Tube already loaded'); return; }
-  const isMissile=weaponKey&&weaponKey!=='torp';
+  const isMissile=weaponKey&&!isTorpLoad(weaponKey);
+  const rackKey=isMissile?weaponKey:(C.player.torpWeapon||'mk48_adcap');
+  if((player.rackStock?.[rackKey]||0)<=0){ _COMMS.weapons.error('Not in rack'); return; }
   if(isMissile){
-    const misTypes=C.player.missileTypes||[];
-    if(!misTypes.includes(weaponKey)){ _COMMS.weapons.error('Weapon not aboard'); return; }
-    if((player.missileStock||0)<=0){ _COMMS.weapons.error('No missiles in stock'); return; }
     player.missileStock--;
   } else {
-    if((player.torpStock||0)<=0){ _COMMS.weapons.error('No torpedoes in stock'); return; }
     player.torpStock--;
   }
+  if(player.rackStock) player.rackStock[rackKey]=Math.max(0,(player.rackStock[rackKey]||0)-1);
   const reloadTime=C.player.torpReloadTime||28;
   const totalT=reloadTime*(isMissile?(C.weapons?.[weaponKey]?.reloadMult??1.5):1.0);
   const wl=isMissile?(C.weapons?.[weaponKey]?.shortLabel||weaponKey.toUpperCase()):'TORPEDO';
@@ -131,6 +127,7 @@ function _orderLoad(tubeIdx,weaponKey){
 }
 
 // Unload a tube and return the weapon to stock.
+// The weapon must have a free rack slot to go into.
 function _orderUnload(tubeIdx){
   if(player.tubeOp){ _COMMS.weapons.torpRoomBusy(); return; }
   const tubes=player.torpTubes;
@@ -139,6 +136,10 @@ function _orderUnload(tubeIdx){
   if(tubes[t]===-1){ _COMMS.weapons.error('Wire live \u2014 cut first'); return; }
   if(tubes[t]>0){ _COMMS.weapons.error('Tube busy'); return; }
   if(player.tubeLoad?.[t]==null){ _COMMS.weapons.error('Tube already empty'); return; }
+  // Check rack has space for the weapon being removed
+  const rackCap=C.player.magazineRack??(C.player.torpStock||12);
+  const rackUsed=(player.torpStock||0)+(player.missileStock||0);
+  if(rackUsed>=rackCap){ _COMMS.weapons.error('Magazine full \u2014 cannot unload'); return; }
   const reloadTime=C.player.torpReloadTime||28;
   const totalT=reloadTime*0.65;
   player.tubeOp={type:'unload',tubeIdx:t,weaponKey:null,progress:0,totalT};
@@ -147,6 +148,7 @@ function _orderUnload(tubeIdx){
 }
 
 // Strike reload -- swap loaded weapon without emptying first (takes 2.15x reload time).
+// The outgoing weapon must have a free rack slot to go into.
 function _orderStrikeReload(tubeIdx,weaponKey){
   if(player.tubeOp){ _COMMS.weapons.torpRoomBusy(); return; }
   const tubes=player.torpTubes;
@@ -154,16 +156,25 @@ function _orderStrikeReload(tubeIdx,weaponKey){
   if(!tubes||t<0||t>=tubes.length){ _COMMS.weapons.error('Invalid tube'); return; }
   if(tubes[t]===-1){ _COMMS.weapons.error('Wire live \u2014 cut first'); return; }
   if(tubes[t]>0){ _COMMS.weapons.error('Tube busy'); return; }
-  const isMissile=weaponKey&&weaponKey!=='torp';
-  if(isMissile){
-    const misTypes=C.player.missileTypes||[];
-    if(!misTypes.includes(weaponKey)){ _COMMS.weapons.error('Weapon not aboard'); return; }
-    if((player.missileStock||0)<=0){ _COMMS.weapons.error('No missiles in stock'); return; }
-    player.missileStock--;
-  } else {
-    if((player.torpStock||0)<=0){ _COMMS.weapons.error('No torpedoes in stock'); return; }
-    player.torpStock--;
+  // Check rack has space for outgoing weapon (swap needs a free slot)
+  const rackCap=C.player.magazineRack??(C.player.torpStock||12);
+  const rackUsed=(player.torpStock||0)+(player.missileStock||0);
+  if(rackUsed>=rackCap){ _COMMS.weapons.error('Magazine full \u2014 cannot swap'); return; }
+  const isMissile=weaponKey&&!isTorpLoad(weaponKey);
+  const rackKey=isMissile?weaponKey:(C.player.torpWeapon||'mk48_adcap');
+  if((player.rackStock?.[rackKey]||0)<=0){ _COMMS.weapons.error('Not in rack'); return; }
+  // Return outgoing weapon to rack
+  const outgoing=player.tubeLoad?.[t];
+  if(outgoing){
+    const outKey=isTorpLoad(outgoing)?(C.player.torpWeapon||'mk48_adcap'):outgoing;
+    if(player.rackStock) player.rackStock[outKey]=(player.rackStock[outKey]||0)+1;
+    if(isTorpLoad(outgoing)) player.torpStock++;
+    else player.missileStock++;
   }
+  // Consume incoming weapon from rack
+  if(isMissile) player.missileStock--;
+  else player.torpStock--;
+  if(player.rackStock) player.rackStock[rackKey]=Math.max(0,(player.rackStock[rackKey]||0)-1);
   const reloadTime=C.player.torpReloadTime||28;
   const totalT=reloadTime*2.15;
   const wl=isMissile?(C.weapons?.[weaponKey]?.shortLabel||weaponKey.toUpperCase()):'TORPEDO';
@@ -182,7 +193,7 @@ function _fireMissile(){
   const tubeLoad=player.tubeLoad||[];
   let tubeIdx=-1;
   for(let i=0;i<tubeLoad.length;i++){
-    if(player.torpTubes[i]===0 && tubeLoad[i] && tubeLoad[i]!=='torp'){ tubeIdx=i; break; }
+    if(player.torpTubes[i]===0 && tubeLoad[i] && !isTorpLoad(tubeLoad[i])){ tubeIdx=i; break; }
   }
   if(tubeIdx<0){ _COMMS.weapons.error('No missile ready in tube'); return; }
   const missileType=tubeLoad[tubeIdx];
@@ -327,7 +338,7 @@ export function tickTubeOps(dt){
       if(!player._tubeOpDone) player._tubeOpDone=new Set();
       player._tubeOpDone.add(op.tubeIdx);
       const t=op.tubeIdx;
-      const isMissile=op.weaponKey&&op.weaponKey!=='torp';
+      const isMissile=op.weaponKey&&!isTorpLoad(op.weaponKey);
       const wl=isMissile?(C.weapons?.[op.weaponKey]?.shortLabel||op.weaponKey.toUpperCase()):'TORPEDO';
       if(op.type==='load'){
         player.torpTubes[t]=0;
@@ -336,16 +347,15 @@ export function tickTubeOps(dt){
       } else if(op.type==='unload'){
         player.torpTubes[t]=0;
         const wasLoad=player.tubeLoad[t]||'torp';
-        // Return weapon to appropriate stock
-        if(wasLoad!=='torp') player.missileStock=(player.missileStock||0)+1;
+        // Return weapon to appropriate stock (totals + per-type)
+        const wasKey=isTorpLoad(wasLoad)?(C.player.torpWeapon||'mk48_adcap'):wasLoad;
+        if(!isTorpLoad(wasLoad)) player.missileStock=(player.missileStock||0)+1;
         else player.torpStock=(player.torpStock||0)+1;
+        if(player.rackStock) player.rackStock[wasKey]=(player.rackStock[wasKey]||0)+1;
         player.tubeLoad[t]=null;
         _COMMS.weapons.unloadComplete(t+1);
       } else if(op.type==='strike'){
-        // Return old weapon, load new
-        const oldLoad=player.tubeLoad[t]||'torp';
-        if(oldLoad!=='torp') player.missileStock=(player.missileStock||0)+1;
-        else player.torpStock=(player.torpStock||0)+1;
+        // Strike reload — old weapon already returned to rack at order time
         player.torpTubes[t]=0;
         player.tubeLoad[t]=op.weaponKey;
         _COMMS.weapons.strikeReloadComplete(t+1,wl);

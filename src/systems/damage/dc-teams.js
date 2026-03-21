@@ -86,13 +86,14 @@ export function assignTeam(teamId,comp){
   if((team.state==='on_scene'||team.state==='transit')&&(roomSection(team.location)===comp||team.destination===comp)) return;
 
   // Can team cross? (reactor flooded blocks crossing)
-  const fwd=['fore_ends','control_room','aux_section'];
-  const aft=['engine_room','aft_ends'];
-  const reactorFlooded=d.flooded.reactor_comp||d.flooded.aux_section;
-  if(reactorFlooded){
+  const _rxIdx=COMPS.findIndex(c=>c==='reactor_comp'||c==='reactor');
+  const _rxFlooded=_rxIdx>=0&&d.flooded[COMPS[_rxIdx]];
+  if(_rxFlooded){
     const teamSec=roomSection(team.location)||team.location;
-    const teamFwd=fwd.includes(teamSec)||teamSec==='reactor_comp';
-    const destFwd=fwd.includes(comp)||comp==='reactor_comp';
+    const teamIdx=COMPS.indexOf(teamSec);
+    const destIdx=COMPS.indexOf(comp);
+    const teamFwd=teamIdx<=_rxIdx;
+    const destFwd=destIdx<=_rxIdx;
     if(teamFwd!==destFwd){ _COMMS?.dc.cannotCross(team.label); return; }
   }
 
@@ -128,13 +129,13 @@ export function recallTeam(teamId){
 
 // ── DC auto-dispatch helpers ──────────────────────────────────────────────
 export function _canReachComp(team,comp,d){
-  const fwd=['fore_ends','control_room','aux_section'];
-  const reactorFlooded=d.flooded.reactor_comp||d.flooded.aux_section;
-  if(!reactorFlooded) return true;
+  const rxIdx=COMPS.findIndex(c=>c==='reactor_comp'||c==='reactor');
+  const rxFlooded=rxIdx>=0&&d.flooded[COMPS[rxIdx]];
+  if(!rxFlooded) return true;
   const loc=roomSection(team.location)||roomSection(team.home)||team.location;
-  const teamFwd=fwd.includes(loc)||loc==='reactor_comp';
-  const destFwd=fwd.includes(comp)||comp==='reactor_comp';
-  return teamFwd===destFwd;
+  const teamIdx=COMPS.indexOf(loc);
+  const destIdx=COMPS.indexOf(comp);
+  return (teamIdx<=rxIdx)===(destIdx<=rxIdx);
 }
 
 export function _bestDCTarget(team,d){
@@ -154,7 +155,9 @@ export function _bestDCTarget(team,d){
   for(const comp of COMPS){
     if(covered.has(comp)) continue;
     if(!_canReachComp(team,comp,d)) continue;
-    if(d.floodRate[comp]>0) return comp;
+    // Check per-room breach rates — any room in this section actively breached?
+    const hasRoomBreach = (SECTION_ROOMS[comp]||[]).some(rid=>(d.roomFloodRate?.[rid]||0)>0);
+    if(hasRoomBreach || d.floodRate[comp]>0) return comp;
   }
   return null;
 }
@@ -217,12 +220,19 @@ function _nextRepairTarget(comp,d){
   return repairable[0]||null;
 }
 
-// Pick the best room in a section for DC team arrival (worst fire room, or first room)
+// Pick the best room in a section for DC team arrival (worst threat room)
 function _bestArrivalRoom(section,d){
   const rooms=SECTION_ROOMS[section]||[];
   if(!rooms.length) return section; // fallback
-  // Prefer the room with the worst fire
-  let best=rooms[0], bestFire=0;
+  // Priority 1: room with highest active breach rate (flood source)
+  let best=rooms[0], bestRate=0;
+  for(const rid of rooms){
+    const br=d.roomFloodRate?.[rid]||0;
+    if(br>bestRate){ bestRate=br; best=rid; }
+  }
+  if(bestRate>0) return best;
+  // Priority 2: room with worst fire
+  let bestFire=0;
   for(const rid of rooms){
     const f=d.fire[rid]||0;
     if(f>bestFire){ bestFire=f; best=rid; }
@@ -364,13 +374,24 @@ export function _tickTeams(dt,d){
       }
 
       // ── FLOOD FIGHTING ──────────────────────────────────────────────
-      const FLOOD_FIGHT_RATE=0.055;
-      if(team.task==='flood'||d.floodRate[sec]>0){
+      // DC teams fight per-room floods: target the room with the highest
+      // active breach rate in their section. Suppress roomFloodRate.
+      const FLOOD_FIGHT_RATE=0.065;
+      // Find the worst breached room in this section
+      const _secRooms = (SECTION_ROOMS[sec]||[]);
+      const _worstRoom = _secRooms.reduce((best,rid)=>{
+        const r = d.roomFloodRate?.[rid]||0;
+        return r > (d.roomFloodRate?.[best]||0) ? rid : best;
+      }, _secRooms[0]);
+      const _hasRoomBreach = _worstRoom && (d.roomFloodRate?.[_worstRoom]||0) > 0;
+      // Also check legacy section-level rate (WTD spread)
+      const _hasAnySectionFlood = _hasRoomBreach || d.floodRate[sec] > 0;
+      if(team.task==='flood'||_hasAnySectionFlood){
         team.task='flood';
         team._locked=true;
 
-        // If floodRate already 0 (e.g. after blow re-entry), skip straight to post-seal
-        if(d.floodRate[sec]<=0){
+        // If no active breaches (e.g. after blow re-entry), skip straight to post-seal
+        if(!_hasAnySectionFlood){
           team._locked=false;
           if((d.flooding[sec]||0)<=0.05) _returnCrew(sec,d);
           team.task=null;
@@ -383,10 +404,19 @@ export function _tickTeams(dt,d){
           continue;
         }
 
+        // Suppress the worst room breach
         const reduction=FLOOD_FIGHT_RATE*eff;
-        d.floodRate[sec]=Math.max(0,d.floodRate[sec]-reduction*dt);
+        if(_hasRoomBreach){
+          d.roomFloodRate[_worstRoom]=Math.max(0,(d.roomFloodRate[_worstRoom]||0)-reduction*dt);
+        }
+        // Also suppress legacy section-level rate
+        if(d.floodRate[sec]>0){
+          d.floodRate[sec]=Math.max(0,d.floodRate[sec]-reduction*0.5*dt);
+        }
 
-        if(d.floodRate[sec]===0){
+        // Check if all breaches in section are sealed
+        const _allSealed = !_secRooms.some(rid=>(d.roomFloodRate?.[rid]||0)>0) && d.floodRate[sec]<=0;
+        if(_allSealed){
           team._locked=false;
           if((d.flooding[sec]||0)<=0.05) _returnCrew(sec,d);
           team.task=null;

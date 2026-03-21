@@ -30,12 +30,24 @@ export function effectiveState(sys,d){
   if(def.ctrl){
     worst=Math.max(worst, STATES.indexOf(d.systems[def.ctrl]||'nominal'));
   }
-  // Unmanned section — no fit crew means active systems can't be operated
+  // Unmanned room — system goes offline if its specific room is uninhabitable
+  // (flooded, drenched, or actively on fire above 50%)
+  // Systems in rooms that aren't directly threatened remain operational even if
+  // crew have evacuated from other rooms in the same section.
   if(!PASSIVE_SYS.has(sys) && d.crew){
-    const sec=ROOMS[def.room]?.section;
+    const room=def.room;
+    const sec=ROOMS[room]?.section;
     if(sec){
-      const fitCrew=(d.crew[sec]||[]).filter(cr=>cr.status==='fit'&&!cr.displaced);
-      if(fitCrew.length===0) worst=Math.max(worst, STATES.indexOf('offline'));
+      const isFlooded=d.flooded?.[sec];
+      const isDrenched=(d._fireDrench?.[sec]?.level??0)>=1;
+      const roomFire=(d.fire?.[room]||0)>0.50;
+      if(isFlooded||isDrenched||roomFire){
+        worst=Math.max(worst, STATES.indexOf('offline'));
+      } else {
+        // Legacy fallback: if the entire section truly has zero crew (all killed, not just displaced)
+        const livingCrew=(d.crew[sec]||[]).filter(cr=>cr.status!=='killed');
+        if(livingCrew.length===0) worst=Math.max(worst, STATES.indexOf('offline'));
+      }
     }
   }
   return STATES[worst];
@@ -205,10 +217,15 @@ export function getTrimState(){
   if(!d) return {trim:0, buoyancy:0};
   const levers = C.player.trimLevers || {};
   let trim=0, buoyancy=0;
+  // Weight buoyancy by section volume — forward (12 comps) contributes more
+  // than reactor (3 comps) when both at 100% flooded.
+  // Normalised to reference volume of 8 compartments.
   for(const comp of COMPS){
     const f = d.flooding[comp]||0;
-    trim    += f * (levers[comp]||0);
-    buoyancy += f;
+    const vol = COMP_DEF[comp]?.volume || 8;
+    const volWeight = vol / 8; // forward(12)→1.5×, reactor(3)→0.375×
+    trim     += f * (levers[comp]||0) * volWeight;
+    buoyancy += f * volWeight;
   }
   return {trim, buoyancy};
 }

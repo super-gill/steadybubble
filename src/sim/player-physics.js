@@ -4,6 +4,7 @@ import { CONFIG } from '../config/constants.js';
 import { rand, clamp } from '../utils/math.js';
 import { player, triggerScram } from '../state/sim-state.js';
 import { session, addLog } from '../state/session-state.js';
+import { COMPS } from '../systems/damage/damage-data.js';
 
 const C = CONFIG;
 
@@ -220,8 +221,10 @@ export function tickNavSig(dt){
 
 export function _oowName(watchId){
   const d=player.damage; if(!d) return 'unknown';
-  for(const comp of ['control_room']){
-    const m=(d.crew[comp]||[]).find(c=>c.role==='OOW'&&c.watch===watchId);
+  // OOW role varies by nation: OOW (RN), OOD (USN), WO (DE)
+  const oowRoles = ['OOW','OOD','WO'];
+  for(const comp of COMPS){
+    const m=(d.crew[comp]||[]).find(c=>oowRoles.includes(c.role)&&c.watch===watchId);
     if(m) return m.lastName;
   }
   return 'unknown';

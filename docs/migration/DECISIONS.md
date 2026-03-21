@@ -1,4 +1,6 @@
-# Steady Bubble — Decisions Log
+# Steady Bubble — Decisions Log (Migration Era)
+
+> **ARCHIVED.** These are the decisions made during the migration project (Phases 0-4) and the casualty system upgrade (2026-03-15 through 2026-03-19). For active project decisions, see `../DECISIONS.md`.
 
 Architectural and process decisions made during the project. Recorded so they are not re-argued in future sessions.
 
@@ -32,7 +34,7 @@ Architectural and process decisions made during the project. Recorded so they ar
 
 **Corrective action:** Split `render/index.js` during Phase 4 before sign-off. Extract sonar contact drawing, torpedo/weapon visuals, and effect rendering into sub-modules under `src/render/`. Target: all files under 800 lines.
 
-**Resolution:** Split completed. `render/index.js` reduced from 1,156 → 759 lines. Two new files created: `render-contacts.js` (289 lines — sonar bearing lines, TMA visualization, towed array bearings) and `render-weapons.js` (246 lines — torpedo trails, wire lines, ASROC, cruise missiles, depth charges, CWIS tracers). Build verified clean.
+**Resolution:** Split completed. `render/index.js` reduced from 1,156 -> 759 lines. Two new files created: `render-contacts.js` (289 lines — sonar bearing lines, TMA visualization, towed array bearings) and `render-weapons.js` (246 lines — torpedo trails, wire lines, ASROC, cruise missiles, depth charges, CWIS tracers). Build verified clean.
 
 ---
 

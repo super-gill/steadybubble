@@ -15,8 +15,11 @@ export const ui = {
   vesselScrollY: 0,
 
   // ── Start screen navigation ────────────────────────────────────────────────
-  startPhase: 'scenario',  // 'scenario' | 'vessel'
+  startPhase: 'scenario',  // 'scenario' | 'vessel' | 'loadout'
   vesselTab: 'player',
+
+  // ── Damage screen selected watchspace ──────────────────────────────────────
+  selectedWatchspace: null,  // room ID (e.g. 'fwd_control') or null
 
   // ── Weapons proposal (pending fire solution) ───────────────────────────────
   wepsProposal: null,

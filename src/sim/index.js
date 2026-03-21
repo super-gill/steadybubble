@@ -260,16 +260,43 @@ function reset(){
   const spawn=_MAPS?.getMap()?.playerSpawn||{wx:4000,wy:5000};
   player.wx=spawn.wx; player.wy=spawn.wy;
   player.heading=0; player.speed=0; player.speedOrderKts=0;
-  const spawnDepth=Math.min(260, C.player.divingLimit||260);
+  const spawnDepth=Math.min(260, C.player.safeDivingDepth||C.player.divingLimit||260);
   player.depth=spawnDepth; player.depthOrder=spawnDepth;
   player.vy=0; player.turnRate=0; player.hp=C.player.hpMax; player.invuln=0;
   player.noise=0; player.noiseTransient=0; player.cavitating=false;
   player.torpCd=0; player.pingCd=0; player.cmCd=0; player.cmStock=C.player.cmStock??12; player.sonarPulse=0; player.periscopeCd=0; player.periscopeT=0;
   // Torpedo tubes: array of per-tube reload countdowns (0 = loaded & ready)
+  // All tubes start loaded (wartime SOP). torpStock = rack contents only.
   const nTubes=C.player.torpTubes||4;
   player.torpTubes=[];
   for(let i=0;i<nTubes;i++) player.torpTubes.push(0);
-  player.torpStock=C.player.torpStock||12;
+  const rackCap=C.player.magazineRack??(Math.max(0,(C.player.torpStock||12)-nTubes));
+
+  // Apply loadout if set by pre-mission screen, otherwise use defaults
+  const lo=session.loadout;
+  if(lo&&lo.rack){
+    // Rack contents from player's loadout selection — per-type tracking
+    const torpKey=C.player.torpWeapon||'mk48_adcap';
+    player.torpStock=lo.rack[torpKey]||0;
+    const missileKeys=(C.player.missileTypes||[]);
+    player.missileStock=missileKeys.reduce((s,k)=>s+(lo.rack[k]||0),0);
+    // Per-type rack stock: { weaponKey: count }
+    player.rackStock = {};
+    for(const [k,v] of Object.entries(lo.rack)){ if(v>0) player.rackStock[k]=v; }
+  } else {
+    // Default rack: all torpedoes minus default missile allocation
+    const defaultMissiles=C.player.missileStock||0;
+    player.torpStock=Math.max(0, rackCap-defaultMissiles);
+    // Build default rackStock
+    const torpKey=C.player.torpWeapon||'mk48_adcap';
+    player.rackStock = { [torpKey]: player.torpStock };
+    // Default missiles — split evenly across configured types (simplified)
+    if(defaultMissiles>0){
+      const misTypes=C.player.missileTypes||[];
+      if(misTypes.length>0){ player.rackStock[misTypes[0]]=defaultMissiles; }
+    }
+  }
+
   player.battery=1.0; player.snorkeling=false; player.snorkelOrdered=false; player._battDead=false;
   player._snorkelOrderedFired=false; player._snorkelCancelledFired=false;
   player._snorkelNoisyCautionFired=false; player._snorkelT=0; player._lastBatBand='ok';
@@ -277,12 +304,18 @@ function reset(){
   player._coolantLeak=null; player._steamLeak=null; player._turbineTrip=null; player._flankDepthT=0; player._prevSpeed=0; player._movingDir=1;
   // Per-tube wire tracking -- null=no wire, or reference to the live torpedo
   player.tubeWires = new Array(C.player.torpTubes||4).fill(null);
-  // Per-tube load type: 'torp' (default), missile key (e.g. 'harpoon'), or null (empty)
-  player.tubeLoad = new Array(C.player.torpTubes||4).fill('torp');
+  // Per-tube load type from loadout selection, or default to torpedo
+  if(lo&&lo.tubes){
+    player.tubeLoad = lo.tubes.slice(0,nTubes);
+    // Pad if loadout has fewer entries than tubes
+    while(player.tubeLoad.length<nTubes) player.tubeLoad.push(C.player.torpWeapon||'torp');
+  } else {
+    player.tubeLoad = new Array(nTubes).fill('torp');
+  }
   // Current torpedo room operation -- only one at a time
   player.tubeOp = null;
-  // Missile stock (separate from torpStock)
-  player.missileStock = C.player.missileStock || 0;
+  // Missile stock — only apply default if loadout wasn't used (loadout sets it at line 283)
+  if(!(lo&&lo.rack)) player.missileStock = C.player.missileStock || 0;
   // VLS cells -- per-cell state array; only populated when vessel has VLS
   const nVls = C.player.vlsCells || 0;
   player.vlsCells = nVls > 0 ? new Array(nVls).fill(null).map(() => ({ state: 'ready' })) : [];

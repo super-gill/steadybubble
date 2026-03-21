@@ -1,6 +1,6 @@
 'use strict';
 
-import { CONFIG } from '../config/constants.js';
+import { CONFIG, isTorpLoad } from '../config/constants.js';
 import { player, world, bullets, sonarContacts, tdc, triggerScram } from '../state/sim-state.js';
 import { session, setMsg, addLog, setTacticalState, setCasualtyState } from '../state/session-state.js';
 import { ui } from '../state/ui-state.js';
@@ -380,7 +380,7 @@ function wepsShoot(){
     _COMMS?.crewState?.actionStations('attack');
   }
   const tubeLoad=(p.tubeLoad||[])[tubeIdx];
-  const wlP=(!tubeLoad||tubeLoad==='torp')?(C.weapons?.[C.player?.torpWeapon]?.shortLabel||'TORPEDO'):(C.weapons?.[tubeLoad]?.shortLabel||tubeLoad.toUpperCase());
+  const wlP=isTorpLoad(tubeLoad)?(C.weapons?.[C.player?.torpWeapon]?.shortLabel||'TORPEDO'):(C.weapons?.[tubeLoad]?.shortLabel||tubeLoad.toUpperCase());
   const cidP=tdc.targetId||'';
   _COMMS?.weapons?.firingProcedures(tubeIdx+1, wlP, cidP, false);
   if(!p.pendingFires) p.pendingFires=[];

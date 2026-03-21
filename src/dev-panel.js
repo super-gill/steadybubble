@@ -64,53 +64,19 @@ export function initDevPanel() {
   `;
   document.head.appendChild(style);
 
-  // ── Watertight sections ──────────────────────────────────────────────────
-  const COMPS=[
-    {key:'fore_ends',   short:'WTS1', label:'WT Section 1'},
-    {key:'control_room',short:'WTS2', label:'WT Section 2'},
-    {key:'aux_section', short:'WTS3', label:'WT Section 3'},
-    {key:'reactor_comp',short:'WTS4', label:'WT Section 4'},
-    {key:'engine_room', short:'WTS5', label:'WT Section 5'},
-    {key:'aft_ends',    short:'WTS6', label:'WT Section 6'},
-  ];
-
-  const SYS_LIST=[
-    {id:'tubes',          label:'Tubes',       comp:'fore_ends'},
-    {id:'sonar_hull',     label:'Sonar',       comp:'fore_ends'},
-    {id:'planes_fwd_hyd', label:'Fwd Planes',  comp:'fore_ends'},
-    {id:'weapon_stow',    label:'Wpn Stow',    comp:'fore_ends'},
-    {id:'fwd_trim',       label:'Fwd Trim',    comp:'fore_ends'},
-    {id:'fwd_escape',     label:'Fwd Esc',     comp:'fore_ends'},
-    {id:'tma',            label:'TMA',         comp:'fore_ends'},
-    {id:'tdc_comp',       label:'TDC',         comp:'fore_ends'},
-    {id:'periscope',      label:'Scope',       comp:'control_room'},
-    {id:'ballast',        label:'Ballast',     comp:'control_room'},
-    {id:'hyd_main',       label:'Hyd Main',    comp:'control_room'},
-    {id:'helm',           label:'Helm',        comp:'control_room'},
-    {id:'fire_ctrl',      label:'Fire Ctrl',   comp:'control_room'},
-    {id:'nav_sys',        label:'Nav',         comp:'control_room'},
-    {id:'comms_mast',     label:'Comms',       comp:'control_room'},
-    {id:'co2_scrubbers',  label:'CO2 Scrub',   comp:'aux_section'},
-    {id:'o2_gen',         label:'O2 Gen',      comp:'aux_section'},
-    {id:'aux_power',      label:'Aux Power',   comp:'aux_section'},
-    {id:'reactor',        label:'Reactor',     comp:'reactor_comp'},
-    {id:'primary_coolant',label:'Pri Cool',    comp:'reactor_comp'},
-    {id:'pressuriser',    label:'Press',       comp:'reactor_comp'},
-    {id:'rad_monitor',    label:'Rad Mon',     comp:'reactor_comp'},
-    {id:'propulsion',     label:'Prop',        comp:'engine_room'},
-    {id:'main_turbines',  label:'Turbines',    comp:'engine_room'},
-    {id:'elec_dist',      label:'Elec Dist',   comp:'engine_room'},
-    {id:'emerg_diesel',   label:'Diesel',      comp:'engine_room'},
-    {id:'towed_array',    label:'Towed Arr',   comp:'aft_ends'},
-    {id:'steering',       label:'Steering',    comp:'aft_ends'},
-    {id:'planes_aft_hyd', label:'Aft Planes',  comp:'aft_ends'},
-    {id:'shaft_seals',    label:'Shaft Seal',  comp:'aft_ends'},
-    {id:'aft_trim',       label:'Aft Trim',    comp:'aft_ends'},
-    {id:'aft_escape',     label:'Aft Esc',     comp:'aft_ends'},
-  ];
+  // ── Dynamic layout data (read from DMG module) ─────────────────────────
+  function _getComps(){ return (_DMG?.COMPS||[]).map((key,i)=>({key, short:(_DMG?.COMP_LABELS||[])[i]||`WTS${i+1}`, label:(_DMG?.SECTION_LABEL||{})[key]||key})); }
+  function _getSysList(){
+    const sysDef=_DMG?.SYS_DEF||{};
+    const rooms=_DMG?.ROOMS||{};
+    const isDiesel=CONFIG?.player?.isDiesel;
+    return Object.entries(sysDef)
+      .filter(([,def])=>!(def.dieselOnly&&!isDiesel)&&!(def.nuclearOnly&&isDiesel))
+      .map(([id,def])=>({id, label:def.label||id, comp:rooms[def.room]?.section||'?'}));
+  }
 
   // ── HTML ──────────────────────────────────────────────────────────────────
-  const floodBtns  = COMPS.map(c=>`<button class="dev-btn danger" data-flood="${c.key}">${c.short}</button>`).join('');
+  const floodBtns  = ''; // rebuilt dynamically
 
   const panel=document.createElement('div');
   panel.id='dev-panel';
@@ -145,8 +111,10 @@ export function initDevPanel() {
         <button class="dev-btn" id="dev-btn-bat5">BAT 5%</button>
         <button class="dev-btn danger" id="dev-btn-bat0">BAT 0%</button>
       </div>
-      <div class="dev-section-label">Flood</div>
-      <div class="dev-row">${floodBtns}</div>
+      <div class="dev-section-label">Flood (section hit)</div>
+      <div class="dev-row" id="dev-flood-row"></div>
+      <div class="dev-section-label">Flood (per room)</div>
+      <div id="dev-flood-rooms"></div>
       <div class="dev-row">
         <button class="dev-btn warn" id="dev-btn-flood-clear">Clear Floods</button>
         <button class="dev-btn danger" id="dev-btn-flood-multi">Multi-Flood</button>
@@ -233,19 +201,134 @@ export function initDevPanel() {
   panel.style.display='none';
   document.body.appendChild(panel);
 
-  // ── Build systems rows ────────────────────────────────────────────────────
-  const sysRowEl=document.getElementById('dev-sys-row');
-  for(const sys of SYS_LIST){
-    const row=document.createElement('div');
-    row.style.cssText='display:flex;align-items:center;gap:3px;';
-    row.innerHTML=`
-      <span style="font-size:9px;color:rgba(0,200,255,0.55);width:72px;flex-shrink:0">${sys.label}</span>
-      <button class="dev-btn" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="degraded">DEG</button>
-      <button class="dev-btn danger" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="offline">OFF</button>
-      <button class="dev-btn danger" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="destroyed">DEST</button>
-      <button class="dev-btn active" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="nominal">NOM</button>
-    `;
-    sysRowEl.appendChild(row);
+  // ── Rebuild dynamic sections from current layout ──────────────────────────
+  let _lastLayoutKey='';
+  function rebuildDynamic(){
+    const layoutKey=(_DMG?.COMPS||[]).join(',');
+    if(layoutKey===_lastLayoutKey) return;
+    _lastLayoutKey=layoutKey;
+    const COMPS=_getComps();
+    const SYS_LIST=_getSysList();
+
+    // Flood buttons
+    const floodContainer=document.getElementById('dev-flood-row');
+    if(floodContainer){
+      floodContainer.innerHTML='';
+      for(const c of COMPS){
+        const b=document.createElement('button');
+        b.className='dev-btn danger'; b.textContent=c.short; b.dataset.flood=c.key;
+        b.addEventListener('click',()=>{ if(_DMG?.hit){ _DMG.hit(45,null,null,c.key); status(`Hit: ${c.short}`); } });
+        floodContainer.appendChild(b);
+      }
+    }
+
+    // Flood rooms (per-room breach)
+    const floodRoomContainer=document.getElementById('dev-flood-rooms');
+    if(floodRoomContainer){
+      floodRoomContainer.innerHTML='';
+      const rooms=_DMG?.ROOMS||{};
+      const sectionRooms=_DMG?.SECTION_ROOMS||{};
+      for(const c of COMPS){
+        const lbl=document.createElement('div');
+        lbl.style.cssText='font-size:9px;color:rgba(0,120,255,0.45);margin:2px 0 1px;';
+        lbl.textContent=c.label||c.key;
+        floodRoomContainer.appendChild(lbl);
+        const row=document.createElement('div'); row.className='dev-row';
+        for(const rid of (sectionRooms[c.key]||[])){
+          const r=rooms[rid]; if(!r) continue;
+          const b=document.createElement('button');
+          b.className='dev-btn danger'; b.style.fontSize='10px'; b.style.padding='2px 5px';
+          b.textContent=r.label;
+          b.title=`Flood breach: ${rid}`;
+          b.addEventListener('click',()=>{
+            const d=player?.damage; if(!d) return;
+            d.roomFloodRate[rid]=Math.max(d.roomFloodRate[rid]||0, 0.02);
+            d.strikes[c.key]=Math.max(d.strikes[c.key]||0, 1);
+            setCasualtyState('emergency');
+            status(`Flood breach: ${r.label}`);
+          });
+          row.appendChild(b);
+        }
+        floodRoomContainer.appendChild(row);
+      }
+    }
+
+    // Fire rooms
+    const fireContainer=document.getElementById('dev-fire-rooms');
+    if(fireContainer){
+      fireContainer.innerHTML='';
+      const rooms=_DMG?.ROOMS||{};
+      const sectionRooms=_DMG?.SECTION_ROOMS||{};
+      for(const c of COMPS){
+        const lbl=document.createElement('div');
+        lbl.style.cssText='font-size:9px;color:rgba(0,200,255,0.35);margin:2px 0 1px;';
+        lbl.textContent=c.label||c.key;
+        fireContainer.appendChild(lbl);
+        const row=document.createElement('div'); row.className='dev-row';
+        for(const rid of (sectionRooms[c.key]||[])){
+          const r=rooms[rid]; if(!r) continue;
+          const b=document.createElement('button');
+          b.className='dev-btn danger'; b.style.fontSize='10px'; b.style.padding='2px 5px';
+          const isEmpty=!r.crew;
+          b.textContent=(isEmpty?'\u26a0 ':'')+r.label;
+          b.title=`${rid}${isEmpty?' (EMPTY \u2014 '+(r.detectionDelay??45)+'s detect delay)':' (crew: '+r.crew+')'}`;
+          b.addEventListener('click',()=>{ if(_DMG?.igniteFire){ _DMG.igniteFire(rid,0.22); status(`Fire: ${r.label}`); } });
+          row.appendChild(b);
+        }
+        fireContainer.appendChild(row);
+      }
+    }
+
+    // Systems rows
+    const sysRowEl=document.getElementById('dev-sys-row');
+    if(sysRowEl){
+      sysRowEl.innerHTML='';
+      for(const sys of SYS_LIST){
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:3px;';
+        row.innerHTML=`
+          <span style="font-size:9px;color:rgba(0,200,255,0.55);width:90px;flex-shrink:0">${sys.label}</span>
+          <button class="dev-btn" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="degraded">DEG</button>
+          <button class="dev-btn danger" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="offline">OFF</button>
+          <button class="dev-btn danger" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="destroyed">DEST</button>
+          <button class="dev-btn active" style="padding:2px 5px;font-size:10px;" data-sys="${sys.id}" data-state="nominal">NOM</button>
+        `;
+        // Wire click handlers directly
+        row.querySelectorAll('[data-sys][data-state]').forEach(el=>{
+          el.addEventListener('click',()=>{
+            const d=player?.damage; if(!d){ status('No damage state'); return; }
+            d.systems[el.dataset.sys]=el.dataset.state;
+            status(`${el.dataset.sys}: ${el.dataset.state}`);
+          });
+        });
+        sysRowEl.appendChild(row);
+      }
+    }
+
+    // WTD rows
+    const wtdContainer=document.getElementById('dev-wtd-row');
+    if(wtdContainer){
+      wtdContainer.innerHTML='';
+      const wtdPairs=_DMG?.WTD_PAIRS||[];
+      for(const [sA,sB] of wtdPairs){
+        const key=sA+'|'+sB;
+        const labelA=(_DMG?.SECTION_SHORT||{})[sA]||sA;
+        const labelB=(_DMG?.SECTION_SHORT||{})[sB]||sB;
+        const row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;gap:6px;';
+        row.innerHTML=`
+          <span style="font-size:9px;color:rgba(0,200,255,0.55);width:78px;flex-shrink:0">${labelA} / ${labelB}</span>
+          <button class="dev-btn" style="padding:2px 6px;font-size:10px;">TOGGLE</button>
+        `;
+        row.querySelector('button').addEventListener('click',()=>{
+          if(!_DMG){ status('DMG not ready'); return; }
+          _DMG.toggleWTD(sA,sB);
+          const d=player?.damage;
+          status(`WTD ${labelA}/${labelB}: ${d?.wtd?.[key]||'?'}`);
+        });
+        wtdContainer.appendChild(row);
+      }
+    }
   }
 
   // ── Status helper ─────────────────────────────────────────────────────────
@@ -262,12 +345,13 @@ export function initDevPanel() {
     const d=player?.damage;
     const el=document.getElementById('dev-damage-state');
     if(!d){ el.textContent='No damage state'; return; }
+    const comps=_getComps();
     const lines=[];
-    for(const c of COMPS){
+    for(const c of comps){
       const fl=d.flooding?.[c.key]??0;
       const fr=d.floodRate?.[c.key]??0;
-      const sRooms=_DMG?.SECTION_ROOMS?.[c.key]||[`${c.key}_d0`,`${c.key}_d1`,`${c.key}_d2`];
-      const fi=Math.max(...sRooms.map(rid=>d.fire?.[rid]||0));
+      const sRooms=_DMG?.SECTION_ROOMS?.[c.key]||[];
+      const fi=sRooms.length?Math.max(...sRooms.map(rid=>d.fire?.[rid]||0)):0;
       const flooded=d.flooded?.[c.key];
       if(fl>0.005||fr>0||fi>0.01||flooded){
         const parts=[];
@@ -281,22 +365,26 @@ export function initDevPanel() {
     for(const [id,team] of Object.entries(d.teams||{})){
       const lock=team._locked?'\uD83D\uDD12':'';
       const mstr=team._readyT>0?` mstr${Math.ceil(team._readyT)}s`:'';
-      const dest=team.destination?`\u2192${COMPS.find(c2=>c2.key===team.destination)?.short??team.destination}`:'';
+      const destShort=team.destination?(_DMG?.SECTION_SHORT?.[team.destination]||team.destination):'';
+      const dest=destShort?`\u2192${destShort}`:'';
       lines.push(`${team.label}: ${team.state}${mstr} task=${team.task??'\u2014'} ${dest}${lock}`);
     }
-    const WTD_SHORT=['T/C','C/A','A/R','R/M','M/E'];
-    const wtdLine=WTD_SHORT.map((lbl,i)=>{
-      const [sA,sB]=(_DMG?.WTD_PAIRS||[])[i]||[];
-      const state=(sA&&sB)?d.wtd?.[sA+'|'+sB]||'?':'?';
-      return `${lbl}:${state==='open'?'O':'C'}`;
+    const wtdPairs=_DMG?.WTD_PAIRS||[];
+    const wtdLine=wtdPairs.map(([sA,sB])=>{
+      const key=sA+'|'+sB;
+      const lA=(_DMG?.SECTION_SHORT||{})[sA]||sA.slice(0,3);
+      const lB=(_DMG?.SECTION_SHORT||{})[sB]||sB.slice(0,3);
+      const state=d.wtd?.[key]||'?';
+      return `${lA}/${lB}:${state==='open'?'O':'C'}`;
     }).join(' ');
-    lines.push(`WTD: ${wtdLine} | hyd:${d.systems?.hyd_main??'?'}`);
+    if(wtdLine) lines.push(`WTD: ${wtdLine} | hyd:${d.systems?.hyd_main??'?'}`);
     lines.push(`casualty: ${session.casualtyState??'\u2014'}`);
     el.textContent=lines.length?lines.join('\n'):'All clear';
   }
 
   // ── Active state sync ─────────────────────────────────────────────────────
   function syncActive(){
+    rebuildDynamic(); // rebuild if layout changed (vessel selection)
     document.getElementById('dev-btn-overlay').classList.toggle('active', !!session.debugOverlay);
     document.getElementById('dev-btn-noise').classList.toggle('active',   !!session.debugNoise);
     document.getElementById('dev-btn-dmg').classList.toggle('active',     !!ui.showDamageScreen);
@@ -356,110 +444,40 @@ export function initDevPanel() {
   }
 
   // ── Flood ─────────────────────────────────────────────────────────────────
-  document.querySelectorAll('[data-flood]').forEach(el=>{
-    el.addEventListener('click',()=>{
-      const comp=el.dataset.flood;
-      if(_DMG?.hit){
-        _DMG.hit(45, null, null, comp);
-        status(`Hit: ${comp}`);
-      } else { status('DMG not ready'); }
-    });
-  });
+  // Flood buttons are built dynamically in rebuildDynamic()
   btn('dev-btn-flood-clear', ()=>{
     const d=player?.damage; if(!d){ status('No damage state'); return; }
-    for(const c of COMPS){
-      d.flooding[c.key]=0; d.floodRate[c.key]=0; d.flooded[c.key]=false;
+    for(const c of (_DMG?.COMPS||[])){
+      d.flooding[c]=0; d.floodRate[c]=0; d.flooded[c]=false;
+      d.strikes[c]=0;
     }
+    // Clear per-room flood data
+    for(const key of Object.keys(d.roomFlood||{})) d.roomFlood[key]=0;
+    for(const key of Object.keys(d.roomFloodRate||{})) d.roomFloodRate[key]=0;
+    if(d._roomFloodDmg) for(const k of Object.keys(d._roomFloodDmg)) delete d._roomFloodDmg[k];
+    if(d._roomFloodAlerted) for(const k of Object.keys(d._roomFloodAlerted)) delete d._roomFloodAlerted[k];
+    if(d._evacuated) for(const k of Object.keys(d._evacuated)) delete d._evacuated[k];
     status('Floods cleared');
   });
   btn('dev-btn-flood-multi', ()=>{
     if(!_DMG?.hit){ status('DMG not ready'); return; }
-    _DMG.hit(45, null, null, 'fore_ends');
-    _DMG.hit(45, null, null, 'engine_room');
-    status('Multi-flood: TRP + MAN');
+    const comps=_DMG?.COMPS||[];
+    _DMG.hit(45, null, null, comps[0]);
+    if(comps.length>2) _DMG.hit(45, null, null, comps[comps.length-1]);
+    status('Multi-flood: FWD + AFT');
   });
 
   // ── Fire ──────────────────────────────────────────────────────────────────
-  (function(){
-    const container=document.getElementById('dev-fire-rooms');
-    if(!container) return;
-    const SECTION_LABELS={
-      fore_ends:'WT SECTION 1 \u2014 FORE ENDS', control_room:'WT SECTION 2 \u2014 CONTROL',
-      aux_section:'WT SECTION 3 \u2014 AUX', reactor_comp:'WT SECTION 4 \u2014 REACTOR',
-      engine_room:'WT SECTION 5 \u2014 ENGINE', aft_ends:'WT SECTION 6 \u2014 AFT',
-    };
-    const ROOM_DEFS=[
-      {id:'fore_ends_d0',     sec:'fore_ends',    label:'FWD DOME',     crew:0,  detectionDelay:40},
-      {id:'fore_ends_d0b',    sec:'fore_ends',    label:'COMMS',        crew:3,  detectionDelay:0 },
-      {id:'fore_ends_d1',     sec:'fore_ends',    label:'ENG OFFICE',   crew:1,  detectionDelay:20},
-      {id:'fore_ends_d1b',    sec:'fore_ends',    label:'COMPUTER RM',  crew:0,  detectionDelay:35},
-      {id:'fore_ends_d2',     sec:'fore_ends',    label:'TORPEDO ROOM', crew:4,  detectionDelay:0 },
-      {id:'control_room_d0',  sec:'control_room', label:'NAV',          crew:1,  detectionDelay:0 },
-      {id:'control_room_d0b', sec:'control_room', label:'SCOPE WELL',   crew:2,  detectionDelay:0 },
-      {id:'control_room_d0c', sec:'control_room', label:'WARDROOM',     crew:3,  detectionDelay:0 },
-      {id:'control_room_d1',  sec:'control_room', label:'CTRL ROOM',    crew:6,  detectionDelay:0 },
-      {id:'control_room_d1b', sec:'control_room', label:'CO CABIN',     crew:0,  detectionDelay:30},
-      {id:'control_room_d2',  sec:'control_room', label:'MACH SPACE',   crew:0,  detectionDelay:40},
-      {id:'aux_section_d0',   sec:'aux_section',  label:'JR MESS',      crew:6,  detectionDelay:0 },
-      {id:'aux_section_d0b',  sec:'aux_section',  label:'SR MESS',      crew:4,  detectionDelay:0 },
-      {id:'aux_section_d1',   sec:'aux_section',  label:'BUNKS',        crew:2,  detectionDelay:20},
-      {id:'aux_section_d1b',  sec:'aux_section',  label:'VENT PLANT',   crew:0,  detectionDelay:45},
-      {id:'aux_section_d2',   sec:'aux_section',  label:'AMS 1',        crew:0,  detectionDelay:50},
-      {id:'aux_section_d2b',  sec:'aux_section',  label:'RX E-COOL',    crew:0,  detectionDelay:50},
-      {id:'aux_section_d2c',  sec:'aux_section',  label:'SICKBAY',      crew:1,  detectionDelay:0 },
-      {id:'reactor_comp_d0',  sec:'reactor_comp', label:'RC TUNNEL',    crew:0,  detectionDelay:30},
-      {id:'reactor_comp_d1',  sec:'reactor_comp', label:'REACTOR',      crew:3,  detectionDelay:0 },
-      {id:'reactor_comp_d2',  sec:'reactor_comp', label:'RCT LOWER',    crew:0,  detectionDelay:60},
-      {id:'engine_room_d0',   sec:'engine_room',  label:'AFT PASSAGE',  crew:0,  detectionDelay:0 },
-      {id:'engine_room_d0b',  sec:'engine_room',  label:'MANEUVERING',  crew:4,  detectionDelay:0 },
-      {id:'engine_room_d1',   sec:'engine_room',  label:'ELEC DIST',    crew:2,  detectionDelay:0 },
-      {id:'engine_room_d2',   sec:'engine_room',  label:'AFT ATMOS',    crew:0,  detectionDelay:45},
-      {id:'aft_ends_d0',      sec:'aft_ends',     label:'ENGINEERING',  crew:2,  detectionDelay:0 },
-      {id:'aft_ends_d1',      sec:'aft_ends',     label:'PROPULSION',   crew:2,  detectionDelay:0 },
-      {id:'aft_ends_d1b',     sec:'aft_ends',     label:'SHAFT ALLEY',  crew:1,  detectionDelay:0 },
-      {id:'aft_ends_d2',      sec:'aft_ends',     label:'STEERING GEAR',crew:2,  detectionDelay:0 },
-      {id:'aft_ends_d2b',     sec:'aft_ends',     label:'AFT ESCAPE',   crew:0,  detectionDelay:50},
-    ];
-    const bySec={};
-    for(const r of ROOM_DEFS){
-      if(!bySec[r.sec]) bySec[r.sec]=[];
-      bySec[r.sec].push(r);
-    }
-    for(const [sec,rooms] of Object.entries(bySec)){
-      const lbl=document.createElement('div');
-      lbl.style.cssText='font-size:9px;color:rgba(0,200,255,0.35);margin:2px 0 1px;';
-      lbl.textContent=SECTION_LABELS[sec]||sec;
-      container.appendChild(lbl);
-      const row=document.createElement('div');
-      row.className='dev-row';
-      for(const r of rooms){
-        const b=document.createElement('button');
-        b.className='dev-btn danger';
-        b.style.fontSize='10px';
-        b.style.padding='2px 5px';
-        const isEmpty=(!r.crew);
-        b.textContent=(isEmpty?'\u26a0 ':'')+r.label;
-        b.title=`${r.id}${isEmpty?' (EMPTY \u2014 '+(r.detectionDelay??45)+'s detect delay)':' (crew: '+(r.crew||0)+')'}`;
-        b.addEventListener('click',()=>{
-          if(_DMG?.igniteFire){
-            _DMG.igniteFire(r.id, 0.22);
-            status(`Fire: ${r.label}${isEmpty?' (undetected)':''}`);
-          } else { status('DMG not ready'); }
-        });
-        row.appendChild(b);
-      }
-      container.appendChild(row);
-    }
-  })();
+  // Fire room buttons are built dynamically in rebuildDynamic()
   btn('dev-btn-fire-clear', ()=>{
     const d=player?.damage; if(!d){ status('No damage state'); return; }
     for(const key of Object.keys(d.fire||{})) d.fire[key]=0;
     if(d._fireDetected) for(const k of Object.keys(d._fireDetected)) delete d._fireDetected[k];
     if(d._fireDetectT)  for(const k of Object.keys(d._fireDetectT))  delete d._fireDetectT[k];
-    for(const c of COMPS){
-      if(d._fireWatch) d._fireWatch[c.key]=null;
-      if(d._fireDrench) d._fireDrench[c.key]=false;
-      if(d._fireCritical) d._fireCritical[c.key]=false;
+    for(const c of (_DMG?.COMPS||[])){
+      if(d._fireWatch) d._fireWatch[c]=null;
+      if(d._fireDrench) d._fireDrench[c]=false;
+      if(d._fireCritical) d._fireCritical[c]=false;
     }
     for(const team of Object.values(d.teams||{})){
       if(team.task==='drench_pending'){ team.state='ready'; team.task=null; }
@@ -468,22 +486,15 @@ export function initDevPanel() {
   });
   btn('dev-btn-fire-all', ()=>{
     if(!_DMG?.igniteFire){ status('DMG not ready'); return; }
-    for(const c of COMPS) _DMG.igniteFire(c.key, 0.15);
+    const sectionRooms=_DMG?.SECTION_ROOMS||{};
+    for(const c of (_DMG?.COMPS||[])){
+      const rooms=sectionRooms[c]||[];
+      if(rooms.length>0) _DMG.igniteFire(rooms[0], 0.15);
+    }
     status('Fires in all sections');
   });
 
-  // ── Systems ───────────────────────────────────────────────────────────────
-  document.querySelectorAll('[data-sys][data-state]').forEach(el=>{
-    el.addEventListener('click',()=>{
-      const d=player?.damage; if(!d){ status('No damage state'); return; }
-      const sys=el.dataset.sys; const state=el.dataset.state;
-      d.systems[sys]=state;
-      if(state!=='nominal'&&state!=='degraded'){
-        _COMMS?.nav?.steeringCasualty?.(state);
-      }
-      status(`${sys}: ${state}`);
-    });
-  });
+  // Systems click handlers are built dynamically in rebuildDynamic()
 
   // ── DC Teams ──────────────────────────────────────────────────────────────
   btn('dev-btn-emerg', ()=>{
@@ -502,9 +513,8 @@ export function initDevPanel() {
   function resetTeam(teamId){
     const d=player?.damage; if(!d){ status('No damage state'); return; }
     const team=d.teams?.[teamId]; if(!team){ status(`Team ${teamId} not found`); return; }
-    const homeDef={alpha:'aux_section_d0b', bravo:'engine_room_d0'};
     team.state='ready';
-    team.location=homeDef[teamId]||team.home;
+    team.location=team.home;
     team.destination=null;
     team.transitEta=0;
     team.task=null;
@@ -530,36 +540,7 @@ export function initDevPanel() {
     status('Muster countdown skipped');
   });
 
-  // ── Watertight Doors ──────────────────────────────────────────────────────
-  (function(){
-    const container=document.getElementById('dev-wtd-row');
-    if(!container) return;
-    const WTD_LABELS=[
-      {key:'fore_ends|control_room',    label:'TORP / CTRL'},
-      {key:'control_room|aux_section',  label:'CTRL / AUX'},
-      {key:'aux_section|reactor_comp',  label:'AUX / RX'},
-      {key:'reactor_comp|engine_room',  label:'RX / MAN'},
-      {key:'engine_room|aft_ends',      label:'MAN / AFT'},
-    ];
-    for(const wtdDef of WTD_LABELS){
-      const row=document.createElement('div');
-      row.style.cssText='display:flex;align-items:center;gap:6px;';
-      row.innerHTML=`
-        <span style="font-size:9px;color:rgba(0,200,255,0.55);width:78px;flex-shrink:0">${wtdDef.label}</span>
-        <button class="dev-btn" style="padding:2px 6px;font-size:10px;" data-wtd-key="${wtdDef.key}" data-wtd-action="toggle">TOGGLE</button>
-      `;
-      container.appendChild(row);
-    }
-    container.addEventListener('click', e=>{
-      const btn2=e.target.closest('[data-wtd-key]'); if(!btn2) return;
-      const key=btn2.dataset.wtdKey;
-      const [sA,sB]=key.split('|');
-      if(!_DMG){ status('DMG not ready'); return; }
-      _DMG.toggleWTD(sA,sB);
-      const d=player?.damage;
-      status(`WTD ${btn2.closest('div').querySelector('span').textContent}: ${d?.wtd?.[key]||'?'}`);
-    });
-  })();
+  // WTD buttons are built dynamically in rebuildDynamic()
   btn('dev-btn-wtd-open-all', ()=>{
     const d=player?.damage; if(!d){ status('No damage state'); return; }
     for(const key of Object.keys(d.wtd||{})) d.wtd[key]='open';

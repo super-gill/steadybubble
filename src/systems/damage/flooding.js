@@ -55,14 +55,26 @@ export function _wtdFloodSpread(dt, d, pressureMult){
     if((d.wtd[a+'|'+b]||'open')!=='open') continue;
     const fa=d.flooded[a]?1:(d.flooding[a]||0);
     const fb=d.flooded[b]?1:(d.flooding[b]||0);
-    if(fa<0.05&&fb<0.05) continue;
+    // WTD spread only starts when source section has significant flooding (>25%)
+    // A small breach in one room shouldn't immediately push water through the WTD
+    if(fa<0.25&&fb<0.25) continue;
     const diff=fa-fb;
-    if(Math.abs(diff)<0.05) continue;
-    const spreadAmt=0.12*pressureMult*dt;
-    // Spread from higher to lower, fire watchkeeper alert on first ingress into manned section
-    const _wtdCheckIngress=(dest, prev)=>{
-      const destHasCrew=(SECTION_ROOMS[dest]||[]).some(rid=>(ROOMS[rid].crew||0)>0);
-      if(prev<0.05 && (d.flooding[dest]||0)>=0.05 && destHasCrew && !(d._wtdSpreadAlerted||{})[dest]){
+    if(Math.abs(diff)<0.10) continue;
+    // Reduced rate — WTD is a narrow passage, not a wide-open hull breach
+    const spreadAmt=0.04*pressureMult*dt;
+    // Spread into the nearest room on the receiving side (per-room flooding)
+    const _wtdSpreadToRooms=(dest)=>{
+      const destRooms = SECTION_ROOMS[dest]||[];
+      if(destRooms.length===0) return;
+      // Find lowest-deck rooms in the section (water enters at bottom)
+      const maxDeck = Math.max(...destRooms.map(rid=>(ROOMS[rid]?.deck??0)));
+      const bottomRooms = destRooms.filter(rid=>(ROOMS[rid]?.deck??0)===maxDeck);
+      const target = bottomRooms.length>0 ? bottomRooms[0] : destRooms[0];
+      const prev = d.roomFlood?.[target]||0;
+      if(d.roomFlood) d.roomFlood[target] = Math.min(1, prev + spreadAmt);
+      // Alert on first ingress
+      const destHasCrew = destRooms.some(rid=>(ROOMS[rid]?.crew||0)>0);
+      if(prev<0.05 && (d.roomFlood?.[target]||0)>=0.05 && destHasCrew && !(d._wtdSpreadAlerted||{})[dest]){
         if(!d._wtdSpreadAlerted) d._wtdSpreadAlerted={};
         d._wtdSpreadAlerted[dest]=true;
         _alert('FLOODING — '+SECTION_LABEL[dest]);
@@ -71,13 +83,9 @@ export function _wtdFloodSpread(dt, d, pressureMult){
       }
     };
     if(diff>0&&!d.flooded[b]){
-      const prev=d.flooding[b]||0;
-      d.flooding[b]=Math.min(1,prev+spreadAmt);
-      _wtdCheckIngress(b,prev);
+      _wtdSpreadToRooms(b);
     } else if(diff<0&&!d.flooded[a]){
-      const prev=d.flooding[a]||0;
-      d.flooding[a]=Math.min(1,prev+spreadAmt);
-      _wtdCheckIngress(a,prev);
+      _wtdSpreadToRooms(a);
     }
   }
 }
@@ -85,13 +93,16 @@ export function _wtdFloodSpread(dt, d, pressureMult){
 // ── Emergency WTD close — called on first flood detection ────────────────
 // Closes all open WTDs and fires staggered watchkeeper reports.
 // Short door labels for comms use abbreviated section names.
-const _WTD_COMMS = {
+const _WTD_COMMS_LEGACY = {
   'fore_ends|control_room':   { station:'CONN', door:'TORPS/CTRL' },
   'control_room|aux_section': { station:'AUX',  door:'CTRL/MESS'  },
   'aux_section|reactor_comp': { station:'REA',  door:'MESS/RCTR'  },
   'reactor_comp|engine_room': { station:'MAN',  door:'RCTR/MANV'  },
   'engine_room|aft_ends':     { station:'ENG',  door:'MANV/AFT'   },
+  'forward|reactor':          { station:'CONN', door:'FWD/RCTR'   },
+  'reactor|engineering':      { station:'MAN',  door:'RCTR/ENG'   },
 };
+function _getWtdComms(key){ return _WTD_COMMS_LEGACY[key]||{ station:'DC', door:key.replace('|','/').toUpperCase().slice(0,12) }; }
 export function _emergencyCloseWTDs(d){
   if(!d.wtd) return;
   if(!d._wtdAutoClose) d._wtdAutoClose=[];
@@ -104,7 +115,7 @@ export function _emergencyCloseWTDs(d){
     const delay=4.0+Math.random()*16.0; // 4–20 s, independent per door
     d._wtdAutoClose.push({key, t: delay-0.5});
     d._wtdAutoClosedKeys.add(key);
-    const info=_WTD_COMMS[key];
+    const info=_getWtdComms(key);
     if(info) _COMMS?.flood.wtdClosed(info.station, info.door, delay);
   }
 }
@@ -118,7 +129,7 @@ export function _emergencyOpenWTDs(d){
     if((d.wtd[key]||'open')!=='closed') continue;
     const delay=4.0+Math.random()*16.0; // 4–20 s, independent per door
     d._wtdAutoOpen.push({key, t: delay-0.5});
-    const info=_WTD_COMMS[key];
+    const info=_getWtdComms(key);
     if(info) _COMMS?.flood.wtdOpen(info.station, info.door, delay);
   }
   d._wtdAutoClosedKeys.clear();
@@ -144,7 +155,12 @@ export function _tickWTDAutoClose(dt, d){
   for(let i=pending.length-1;i>=0;i--){
     pending[i].t-=dt;
     if(pending[i].t<=0){
-      if(d.wtd) d.wtd[pending[i].key]='closed';
+      // Skip if WTD system is damaged (offline/destroyed from burn-through or combat)
+      const _wtdSys2=Object.keys(SYS_DEF).find(s=>SYS_DEF[s].isWTD&&SYS_DEF[s].wtdKey===pending[i].key);
+      const _wtdOk=!_wtdSys2||(d.systems[_wtdSys2]||'nominal')==='nominal'||(d.systems[_wtdSys2]||'nominal')==='degraded';
+      if(_wtdOk){
+        if(d.wtd) d.wtd[pending[i].key]='closed';
+      }
       pending.splice(i,1);
     }
   }
@@ -155,6 +171,15 @@ export function toggleWTD(sectionA, sectionB){
   const d=player.damage; if(!d) return;
   const key=sectionA+'|'+sectionB;
   if(!Object.prototype.hasOwnProperty.call(d.wtd, key)) return;
+  // Check if WTD system is damaged — find the WTD system for this door
+  const wtdSys=Object.keys(SYS_DEF).find(s=>SYS_DEF[s].isWTD&&SYS_DEF[s].wtdKey===key);
+  if(wtdSys){
+    const wtdState=d.systems[wtdSys]||'nominal';
+    if(wtdState==='destroyed'||wtdState==='offline'){
+      dcLog(`WTD ${compLabel(sectionA)}/${compLabel(sectionB)} — BULKHEAD DAMAGED — CANNOT OPERATE UNTIL REPAIRED`);
+      return;
+    }
+  }
   if(!_hydMainOk(d)){
     dcLog('WTD — HYDRAULIC PRESSURE TOO LOW — DOOR CANNOT BE OPERATED');
     return;
@@ -176,27 +201,37 @@ export function _floodComp(comp){
 }
 
 // ── Hit compartment from impact angle ─────────────────────────────────────
+// Maps torpedo bearing relative to player heading to a compartment.
+// Uses COMPS array — distributes hit probability across available compartments.
 export function hitCompartment(hitX,hitY){
   const dx=hitX-player.wx,dy=hitY-player.wy;
   const ang=Math.atan2(dy,dx);
   const rel=((ang-player.heading)+Math.PI*3)%(Math.PI*2)-Math.PI;
-  if(rel>-Math.PI*0.25&&rel<Math.PI*0.25) return 'fore_ends';
-  if(Math.abs(rel)<Math.PI*0.5)           return 'control_room';
-  if(Math.abs(rel)>Math.PI*0.75){
-    const r=rand(0,1);
-    return r>0.5?'engine_room':r>0.15?'reactor_comp':'aux_section';
-  }
-  const r=rand(0,1);
-  return r>0.45?'reactor_comp':r>0.1?'engine_room':'aux_section';
+  const n=COMPS.length;
+  if(n<=1) return COMPS[0];
+  // Map relative bearing to compartment index: bow=first comp, stern=last comp
+  // Forward hit (bow-on): first compartment. Stern hit: last compartment.
+  // Broadside: weighted random across middle compartments.
+  const absRel=Math.abs(rel);
+  if(absRel<Math.PI*0.3) return COMPS[0]; // bow hit — first comp
+  if(absRel>Math.PI*0.7) return COMPS[n-1]; // stern hit — last comp
+  // Broadside — random across all compartments, weighted toward middle
+  const idx=Math.min(n-1, Math.floor(rand(0,n)));
+  return COMPS[idx];
 }
 
 // ── Tower traversal ───────────────────────────────────────────────────────
 export function canReachTower(comp,tower,d){
-  const fwd=['fore_ends','control_room','aux_section'];
-  const aft=['engine_room','aft_ends'];
-  const blocked=d.flooded.reactor_comp||d.flooded.aux_section;
-  if(tower==='fwd'){ if(fwd.includes(comp)) return true; return !blocked; }
-  if(tower==='aft'){ if(aft.includes(comp)) return true; return !blocked; }
+  // Find the reactor/midpoint index — sections before it are "forward", after are "aft"
+  const reactorIdx=COMPS.findIndex(c=>c==='reactor_comp'||c==='reactor');
+  if(reactorIdx<0){
+    // No reactor (diesel) — all compartments can reach either tower
+    return true;
+  }
+  const compIdx=COMPS.indexOf(comp);
+  const blocked=d.flooded[COMPS[reactorIdx]];
+  if(tower==='fwd'){ return compIdx<=reactorIdx||!blocked; }
+  if(tower==='aft'){ return compIdx>=reactorIdx||!blocked; }
   return false;
 }
 
@@ -234,6 +269,11 @@ export function sealFlooding(comp){
   }
   d.floodRate[comp]=0;
   d.flooding[comp]=0;
+  // Clear per-room flood data for this section
+  for(const rid of (SECTION_ROOMS[comp]||[])){
+    if(d.roomFlood) d.roomFlood[rid]=0;
+    if(d.roomFloodRate) d.roomFloodRate[rid]=0;
+  }
   if(d._floodDeckDmg?.[comp]) d._floodDeckDmg[comp]={};
   for(const sys of activeSystems(comp)){
     if(d.systems[sys]==='nominal') damageSystem(sys);
@@ -279,8 +319,11 @@ export function applyDepthCascade(dt){
   const _sPMult=1+Math.min(_sDepthM/120,4);
   const seepRate=SEEP_RATE*_sPMult;
 
-  // Apply seep — slow structural weeping, no breach evacuation
-  d.floodRate[comp] = Math.max(d.floodRate[comp]||0, seepRate);
+  // Apply seep — slow structural weeping at per-room level
+  // Pick a random room in the section for the seep point
+  const seepRooms = SECTION_ROOMS[comp]||[];
+  const seepRoom = seepRooms.length>0 ? seepRooms[Math.floor(Math.random()*seepRooms.length)] : null;
+  if(seepRoom && d.roomFloodRate) d.roomFloodRate[seepRoom] = Math.max(d.roomFloodRate[seepRoom]||0, seepRate);
   d._seepComp = d._seepComp || {};
   d._seepComp[comp] = true; // mark as depth seep, not breach
 

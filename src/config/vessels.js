@@ -18,7 +18,7 @@ const mastsUK = [
 
 // ── Shared physics constants (common across all playable vessels) ─────────────
 const sh = {
-  speedIncrementKts:1, speedTau:45, turnRateDeg:2.2, turnRateMinDeg:0.5,
+  speedIncrementKts:1, speedTau:45, accelTau:45, decelTau:30, turnRateDeg:2.2, turnRateMinDeg:0.5,
   periscopeDepth:18, depthStep:60, depthHoldRepeat:0.10,
   depthTau:8.0, depthRateMax:1.8, buoyancyScale:3.6, fillRate:0.022, kFill:0.0016,
   ballast:0.0, ballastRate:0.85, buoyAccel:210, buoyDamp:0.85, vyMax:190,
@@ -72,13 +72,13 @@ const sh = {
 
 // ── Playable vessel definitions ───────────────────────────────────────────────
 export const VESSELS = [
-  { ...sh, key:'688i', name:'USS DALLAS', vesselClass:'LOS ANGELES CLASS', nation:'US', difficulty:'medium',
+  { ...sh, key:'688', name:'USS DALLAS', vesselClass:'LOS ANGELES CLASS (FLIGHT I)', nation:'US', difficulty:'medium', accelTau:45, decelTau:30,
     flavour:'Cold War workhorse. Balanced across all systems.',
     lore:[
-      'SSN-700 · Commissioned 1981 · Los Angeles class — 62 boats built over 22 years',
+      'SSN-700 · Commissioned 1981 · Los Angeles class Flight I — 62 boats built over 22 years',
       'The backbone of the Cold War US submarine fleet. Balanced and capable across all systems.',
       'Conducted extensive intelligence patrols in Soviet home waters throughout the 1980s.',
-      'Standard loadout: 26 MK-48 ADCAP torpedoes plus Harpoon anti-ship and TASM cruise missiles.',
+      'Standard loadout: 26 MK-48 ADCAP torpedoes plus Harpoon anti-ship missiles.',
       'Immortalised in The Hunt for Red October. Still in frontline service into the 2000s.',
       'Recommended for new players who want capable all-round performance with no major weaknesses.',
     ],
@@ -87,11 +87,32 @@ export const VESSELS = [
     torpWeapon:'mk48_adcap', towedArray:'TB-16 / TB-23',
     r:28, hpMax:100, hitR:30, speedMaxKts:20, flankKts:28,
     noiseFloor:0.040, flankNoiseBoost:0.42,
-    torpTubes:4, torpStock:32, torpReloadTime:28, cmStock:12,
-    vlsCells:12, vlsWeapon:'tasm', missileStock:8, missileTypes:['harpoon'],
+    torpTubes:4, torpStock:26, magazineRack:22, torpReloadTime:28, cmStock:12,
+    vlsCells:0, vlsWeapon:null, missileStock:8,
+    missileTypes:['harpoon','tasm','tlam','subroc','mk67_slmm','mk60_captor'],
     cavitationKtsRef:18, speedDeafness:{ startKts:4, fullDeafKts:10 } },
 
-  { ...sh, key:'trafalgar', name:'HMS TRAFALGAR', vesselClass:'TRAFALGAR CLASS', nation:'UK', difficulty:'medium', masts:mastsUK,
+  { ...sh, key:'688i', name:'USS PROVIDENCE', vesselClass:'LOS ANGELES CLASS (IMPROVED)', nation:'US', difficulty:'medium', accelTau:45, decelTau:30,
+    flavour:'Improved 688 with VLS. TLAM cruise missile strike capability.',
+    lore:[
+      'SSN-719 · Commissioned 1985 · Los Angeles Improved (688i) — first boat fitted with VLS',
+      'The 688i upgrade added 12 vertical launch tubes for BGM-109 Tomahawk cruise missiles.',
+      'Identical hull and internal layout to the Flight I boats.',
+      'VLS cells are external to the pressure hull — no impact on internal compartmentation.',
+      'Harpoon phased out on 688i. SUBROC and TASM retired before this variant entered service.',
+      'Recommended for players who want the 688 platform with added land-attack strike from VLS.',
+    ],
+    divingLimitM:400, sonarSuite:'AN/BQQ-5D', sonarQuality:0.85,
+    divingLimit:400, safeDivingDepth:300, designDepth:450, maxDepth:480, crushDepth:520,
+    torpWeapon:'mk48_adcap', towedArray:'TB-16 / TB-23',
+    r:28, hpMax:100, hitR:30, speedMaxKts:20, flankKts:28,
+    noiseFloor:0.040, flankNoiseBoost:0.42,
+    torpTubes:4, torpStock:26, magazineRack:22, torpReloadTime:28, cmStock:12,
+    vlsCells:12, vlsWeapon:'tlam', missileStock:4,
+    missileTypes:['tlam','mk67_slmm','mk60_captor'],
+    cavitationKtsRef:18, speedDeafness:{ startKts:4, fullDeafKts:10 } },
+
+  { ...sh, key:'trafalgar', name:'HMS TRAFALGAR', vesselClass:'TRAFALGAR CLASS', nation:'UK', difficulty:'medium', masts:mastsUK, accelTau:40, decelTau:25, turnRateDeg:2.0,
     flavour:'Pump-jet propulsor — dramatically quieter at speed.',
     lore:[
       'S107 · Commissioned 1983 · Trafalgar class — lead boat of 7',
@@ -106,12 +127,12 @@ export const VESSELS = [
     torpWeapon:'spearfish', towedArray:'TYPE 2026',
     r:26, hpMax:100, hitR:28, speedMaxKts:18, flankKts:26,
     noiseFloor:0.032, flankNoiseBoost:0.30,
-    torpTubes:5, torpStock:25, torpReloadTime:30, cmStock:12,
-    missileStock:6, missileTypes:['sub_harpoon'],
+    torpTubes:5, torpStock:30, magazineRack:25, torpReloadTime:30, cmStock:12,
+    missileStock:6, missileTypes:['sub_harpoon','tlam','stonefish'],
     cavitationKtsRef:20, speedDeafness:{ startKts:5, fullDeafKts:12 },
     sonar:{ ...sh.sonar, bowHullHalfAngleDeg:155, baffleHalfAngleDegBase:13 } },
 
-  { ...sh, key:'swiftsure', name:'HMS SWIFTSURE', vesselClass:'SWIFTSURE CLASS', nation:'UK', difficulty:'medium', masts:mastsUK,
+  { ...sh, key:'swiftsure', name:'HMS SWIFTSURE', vesselClass:'SWIFTSURE CLASS', nation:'UK', difficulty:'medium', masts:mastsUK, accelTau:50, decelTau:35, turnRateDeg:2.0,
     flavour:'Older design, fewer weapons. Quieter than 688i at depth.',
     lore:[
       'S126 · Commissioned 1973 · Swiftsure class — lead boat of 6',
@@ -126,12 +147,12 @@ export const VESSELS = [
     torpWeapon:'tigerfish', towedArray:'TYPE 2026',
     r:24, hpMax:90, hitR:26, speedMaxKts:18, flankKts:25,
     noiseFloor:0.038, flankNoiseBoost:0.38,
-    torpTubes:5, torpStock:20, torpReloadTime:32, cmStock:10,
-    missileStock:6, missileTypes:['sub_harpoon'],
+    torpTubes:5, torpStock:20, magazineRack:15, torpReloadTime:32, cmStock:10,
+    missileStock:6, missileTypes:['sub_harpoon','stonefish'],
     cavitationKtsRef:17, speedDeafness:{ startKts:4, fullDeafKts:11 },
     sonar:{ ...sh.sonar, baffleHalfAngleDegBase:18 } },
 
-  { ...sh, key:'seawolf', name:'USS CONNECTICUT', vesselClass:'SEAWOLF CLASS', nation:'US', difficulty:'easy',
+  { ...sh, key:'seawolf', name:'USS CONNECTICUT', vesselClass:'SEAWOLF CLASS', nation:'US', difficulty:'easy', accelTau:35, decelTau:25, turnRateDeg:1.8,
     flavour:'Post-Cold War overkill. Eight tubes, extreme depth, maximum firepower.',
     lore:[
       'SSN-22 · Commissioned 1998 · Seawolf class — only 3 completed before cancellation',
@@ -146,12 +167,12 @@ export const VESSELS = [
     torpWeapon:'mk48_adcap', towedArray:'TB-16 / TB-29A',
     r:32, hpMax:120, hitR:35, speedMaxKts:20, flankKts:35,
     noiseFloor:0.025, flankNoiseBoost:0.28,
-    torpTubes:8, torpStock:50, torpReloadTime:22, cmStock:16,
-    missileStock:8, missileTypes:['harpoon'],
+    torpTubes:8, torpStock:50, magazineRack:42, torpReloadTime:22, cmStock:16,
+    missileStock:8, missileTypes:['harpoon','tasm','tlam','mk67_slmm','mk60_captor'],
     cavitationKtsRef:22, speedDeafness:{ startKts:5, fullDeafKts:13 },
     sonar:{ ...sh.sonar, bowHullHalfAngleDeg:158, baffleHalfAngleDegBase:12 } },
 
-  { ...sh, key:'type209', name:'U-36', vesselClass:'TYPE 209', nation:'DE', difficulty:'expert',
+  { ...sh, key:'type209', name:'U-36', vesselClass:'TYPE 209', nation:'DE', difficulty:'expert', accelTau:60, decelTau:20, turnRateDeg:2.8,
     flavour:'Diesel-electric. Near-silent on battery. One wrong move and you are out of torpedoes.',
     lore:[
       'U-36 · Commissioned 1997 · Deutsche Marine — Type 209/1400mod variant',
@@ -166,7 +187,7 @@ export const VESSELS = [
     torpWeapon:'sst4', towedArray:'PRS-3 PASSIVE',
     r:18, hpMax:70, hitR:20, speedMaxKts:8, flankKts:12,
     noiseFloor:0.018, flankNoiseBoost:0.55,
-    torpTubes:8, torpStock:14, torpReloadTime:35, cmStock:8,
+    torpTubes:8, torpStock:14, magazineRack:6, torpReloadTime:35, cmStock:8,
     missileStock:4, missileTypes:['sm39'],
     cavitationKtsRef:11, speedDeafness:{ startKts:6, fullDeafKts:14 },
     isDiesel:true, hasTowedArray:false,

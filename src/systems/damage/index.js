@@ -12,6 +12,7 @@ import {
   SYS_DEF, SYS_LABEL, ALL_SYS, STATES, REPAIR_TIME, TRAVEL, HIGH_ENERGY_SYS,
   WTD_PAIRS, WTD_RC_KEYS, ROOM_ADJ, SECTION_SYSTEMS, DIESEL_SECTION_SYSTEMS,
   ROOM_SYSTEMS, EVAC_TO, SECTION_CAP,
+  COMP_FRACS, COMP_LABELS,
   activeSystems, compLabel, roomSection, _sectionNoEvac,
 } from './damage-data.js';
 
@@ -137,7 +138,9 @@ function _returnCrew(comp,d,cause='flood'){
 function _checkClearEmergency(d){
   if(session?.casualtyState!=='emergency') return;
   const anyFire=ROOM_IDS.some(rid=>(d.fire[rid]||0)>0.01);
-  const anyFlood=COMPS.some(s=>(d.flooding[s]||0)>0.001);
+  // Check for active breaches (rooms still taking water), not just residual water level.
+  // Emergency clears when all breaches are sealed — bilge pumps handle the rest.
+  const anyFlood=ROOM_IDS.some(rid=>(d.roomFloodRate?.[rid]||0)>0);
   const anyTeamActive=Object.values(d.teams).some(t=>t.state!=='ready'&&t.state!=='lost');
   // Drenched compartments require venting before the emergency is truly controlled
   const anyDrenched=COMPS.some(s=>(d._fireDrench?.[s]?.level??0)>0);
@@ -166,15 +169,26 @@ _setAssignTeamFn(assignTeam);
 // ── Init ──────────────────────────────────────────────────────────────────
 function initDamage(){
   const crewTotal=COMPS.reduce((a,c)=>a+COMP_DEF[c].crewCount,0);
+  // Build crew manifest before damage object so med team can reference it
+  const _crew = buildCrewManifest();
+  // Find medical crew from built manifest
+  const _medCrew = COMPS.flatMap(c => (_crew[c]||[]).filter(cr => cr.dept==='medical'));
+  const _medTeam = {};
+  for(const cr of _medCrew){
+    _medTeam[cr.id] = { id:cr.id, label:cr.role, state:'standby', location:COMPS[0], destination:null, transitEta:0, treating:null, treatT:0, _deployed:false };
+  }
+  if(Object.keys(_medTeam).length === 0){
+    _medTeam._none = { id:'_none', label:'MED', state:'lost', location:COMPS[0], destination:null, transitEta:0, treating:null, treatT:0, _deployed:false };
+  }
   player.damage={
-    strikes:  {fore_ends:0,control_room:0,aux_section:0,reactor_comp:0,engine_room:0,aft_ends:0},
-    flooded:  {fore_ends:false,control_room:false,aux_section:false,reactor_comp:false,engine_room:false,aft_ends:false},
+    strikes:  Object.fromEntries(COMPS.map(c=>[c,0])),
+    flooded:  Object.fromEntries(COMPS.map(c=>[c,false])),
     systems:Object.fromEntries(ALL_SYS.map(s=>[s,'nominal'])),
     // Progressive flooding: rate (units/s) and current level (0-1)
-    floodRate:{fore_ends:0,control_room:0,aux_section:0,reactor_comp:0,engine_room:0,aft_ends:0},
-    flooding: {fore_ends:0,control_room:0,aux_section:0,reactor_comp:0,engine_room:0,aft_ends:0},
+    floodRate:Object.fromEntries(COMPS.map(c=>[c,0])),
+    flooding: Object.fromEntries(COMPS.map(c=>[c,0])),
     towers:{fwd:'nominal',aft:'nominal'},
-    crew:buildCrewManifest(),
+    crew:_crew,
     crewTotal,
     alerts:[],
     sinking:false,
@@ -193,6 +207,10 @@ function initDamage(){
     escapeQueue:[],
     _tceProcessed:0,
 
+    // Per-room flooding — level 0-1 per room (mirrors fire system)
+    roomFlood:    Object.fromEntries(ROOM_IDS.map(id=>[id,0])),
+    roomFloodRate:Object.fromEntries(ROOM_IDS.map(id=>[id,0])),
+
     // Fire — level 0-1 per room (compartment within section)
     fire:Object.fromEntries(ROOM_IDS.map(id=>[id,0])),
     _fireDetected:{},  // roomId -> true when detected
@@ -207,42 +225,45 @@ function initDamage(){
     // Compartment-level repair jobs (both teams contribute to one shared job)
     repairJobs:{},  // comp -> {sys, progress, totalTime} or null
 
-    // Medical staff — auto-dispatch to casualties
-    medTeam:{
-      oconnor:{ id:'oconnor', label:'LMA', state:'standby', location:'control_room', destination:null, transitEta:0, treating:null, treatT:0, _deployed:false },
-      hayes:  { id:'hayes',   label:'MA',  state:'standby', location:'control_room', destination:null, transitEta:0, treating:null, treatT:0, _deployed:false },
-    },
+    // Medical staff — auto-dispatch to casualties (dynamic per nation)
+    medTeam:_medTeam,
     _medNoStaffFired:false,
 
     // DC teams
-    teams:{
-      alpha:{
-        id:'alpha', label:'DC ALPHA',
-        home:'aux_section_d0b',       // SR MESS — forward DC team berths here
-        state:'ready',
-        location:'aux_section_d0b',   // current compartment (room ID)
-        destination:null,             // target compartment (room ID)
-        transitEta:0,
-        task:null,              // null|'flood'|'repair'
-        repairTarget:null,      // sys name or null (auto)
-        repairProgress:0,
-        statusT:0,              // timer for periodic comms
-        _autoMode:false, _readyT:0, _locked:false,
-      },
-      bravo:{
-        id:'bravo', label:'DC BRAVO',
-        home:'engine_room_d0',        // AFT PASSAGE — aft DC team berths here
-        state:'ready',
-        location:'engine_room_d0',    // current compartment (room ID)
-        destination:null,             // target compartment (room ID)
-        transitEta:0,
-        task:null,
-        repairTarget:null,
-        repairProgress:0,
-        statusT:0,
-        _autoMode:false, _readyT:0, _locked:false,
-      },
-    },
+    teams:(function(){
+      // DC Alpha: first room of first compartment. DC Bravo: first room of last compartment.
+      const fwdComp=COMPS[0], aftComp=COMPS[COMPS.length-1];
+      const fwdRooms=SECTION_ROOMS[fwdComp]||[]; const aftRooms=SECTION_ROOMS[aftComp]||[];
+      const alphaHome=fwdRooms[0]||fwdComp; const bravoHome=aftRooms[0]||aftComp;
+      return {
+        alpha:{
+          id:'alpha', label:'DC ALPHA',
+          home:alphaHome,
+          state:'ready',
+          location:alphaHome,
+          destination:null,
+          transitEta:0,
+          task:null,
+          repairTarget:null,
+          repairProgress:0,
+          statusT:0,
+          _autoMode:false, _readyT:0, _locked:false,
+        },
+        bravo:{
+          id:'bravo', label:'DC BRAVO',
+          home:bravoHome,
+          state:'ready',
+          location:bravoHome,
+          destination:null,
+          transitEta:0,
+          task:null,
+          repairTarget:null,
+          repairProgress:0,
+          statusT:0,
+          _autoMode:false, _readyT:0, _locked:false,
+        },
+      };
+    })(),
     _emergMusterFired:false,
 
     // Hydraulic pressure — 1.0 = full, 0.0 = empty
@@ -297,7 +318,7 @@ function hit(amount,hitX,hitY,forceComp){
   player.invuln=2.0;
   const d=player.damage;
   const severity=clamp(amount/55,0,1);
-  const comp=forceComp||(hitX!=null&&hitY!=null?hitCompartment(hitX,hitY):COMPS[Math.floor(rand(0,5))]);
+  const comp=forceComp||(hitX!=null&&hitY!=null?hitCompartment(hitX,hitY):COMPS[Math.floor(rand(0,COMPS.length))]);
   const def=COMP_DEF[comp];
   if(!def) return;
   const prev=d.strikes[comp];
@@ -309,7 +330,11 @@ function hit(amount,hitX,hitY,forceComp){
     // Systems are NOT instantly destroyed; deck-level damage events handle that as
     // water rises. 'destroyed' state only applies when a damaged system takes another hit.
     d.strikes[comp]=2;
-    d.floodRate[comp]=Math.max(d.floodRate[comp]||0, 0.04+severity*0.04);
+    // Per-room: pick a second impact room and set catastrophic breach rate
+    const _secRooms2=(SECTION_ROOMS[comp]||[]);
+    const _impactRoom2=_secRooms2.length>0?_secRooms2[Math.floor(rand(0,_secRooms2.length))]:null;
+    // Second hit — catastrophic but still survivable with DC response
+    if(_impactRoom2) d.roomFloodRate[_impactRoom2]=Math.max(d.roomFloodRate[_impactRoom2]||0, 0.06+severity*0.06);
     // Reset deck-damage tracking so rising water applies a fresh damage pass
     if(!d._floodDeckDmg) d._floodDeckDmg={};
     d._floodDeckDmg[comp]={};
@@ -331,7 +356,7 @@ function hit(amount,hitX,hitY,forceComp){
 
     _alert(`${SECTION_LABEL[comp]} — SECOND BREACH`);
     _COMMS?.flood.secondBreach(SECTION_LABEL[comp], COMP_STATION[comp]||'ENG');
-    if(comp==='reactor_comp'&&!player.scram&&typeof triggerScram==='function'){
+    if((comp==='reactor_comp'||comp==='reactor')&&!player.scram&&typeof triggerScram==='function'){
       triggerScram('damage');
       _COMMS?.reactor.scram('damage');
     }
@@ -340,16 +365,27 @@ function hit(amount,hitX,hitY,forceComp){
   } else {
     // ── FIRST HIT → PROGRESSIVE FLOODING ────────────────────────────
     d.strikes[comp]=1;
-    // Set flood rate based on severity (units/sec into 0–1 scale)
-    // 0.008/s max → ~125s to fill at surface without DC (realistic 2-min window)
-    // Pressure multiplier in tick drives this to ~36s at 300m — still survivable but urgent
-    d.floodRate[comp]=Math.max(d.floodRate[comp], severity*0.008);
 
-    // Only damage systems near the breach — torpedo hits the hull bottom,
-    // so lower-deck systems are most vulnerable. Filter by deck proximity.
-    const allSys=[...activeSystems(comp)].sort(()=>rand(-1,1));
+    // Only damage systems near the breach — localised to the impact room and its neighbours.
+    // Pick a random room in the section (weighted toward lower decks — torpedo hits hull bottom),
+    // then include systems from that room + adjacent rooms.
+    const sectionRoomIds=(SECTION_ROOMS[comp]||[]);
     const maxDeck=severity>0.85?0:severity>0.5?1:2; // 0=all decks, 2=bottom only
-    const sysList=allSys.filter(s=>(ROOMS[SYS_DEF[s].room]?.deck??1)>=maxDeck);
+    const impactCandidates=sectionRoomIds.filter(rid=>(ROOMS[rid]?.deck??1)>=maxDeck);
+    const impactRoom=impactCandidates.length>0?impactCandidates[Math.floor(rand(0,impactCandidates.length))]:sectionRoomIds[0];
+
+    // Set per-room flood rate at the impact room (breach location).
+    // Rate is higher than old section-level rate because rooms are smaller.
+    // 0.04/s base → room fills in ~25s at surface, then spreads to adjacent rooms.
+    // 0.02/s base → room fills in ~50s at surface. DC has time to respond.
+    d.roomFloodRate[impactRoom]=Math.max(d.roomFloodRate[impactRoom]||0, severity*0.02);
+    // Gather systems from impact room + adjacent rooms (blast radius)
+    const blastRooms=new Set([impactRoom,...(ROOM_ADJ[impactRoom]||[])]);
+    const allSys=[...blastRooms].flatMap(rid=>(ROOM_SYSTEMS[rid]||[]))
+      .filter(s=>!SYS_DEF[s]?.dieselOnly||C.player.isDiesel)
+      .filter(s=>!SYS_DEF[s]?.nuclearOnly||!C.player.isDiesel)
+      .sort(()=>rand(-1,1));
+    const sysList=allSys;
     const numHit=severity>0.7?Math.min(3,sysList.length):1;
     let reactorHit=false;
     for(let i=0;i<Math.min(numHit,sysList.length);i++){
@@ -375,7 +411,7 @@ function hit(amount,hitX,hitY,forceComp){
       _alert(`ESCAPE TOWER ${def.tower.toUpperCase()} DAMAGED`);
     }
     // Hot run — combat hit to fore_ends, severity > 0.30, loaded tube
-    if(comp==='fore_ends' && severity > 0.30 && d.hotRunCountdown==null){
+    if((comp==='fore_ends'||comp==='forward') && severity > 0.30 && d.hotRunCountdown==null){
       const hrCfg = C.player.casualties?.hotRun || {};
       const loadedTubes = (player.torpTubes||[]).map((v,i)=>({v,i})).filter(t=>t.v===0);
       if(loadedTubes.length > 0 && Math.random() < (hrCfg.combatChance||0.06)){
@@ -396,7 +432,7 @@ function hit(amount,hitX,hitY,forceComp){
     }
 
     // Hydrogen combat ignition — hit to engine_room when h2Level >= danger
-    if(comp==='engine_room' && (d.h2Level||0) >= (C.player.casualties?.hydrogen?.dangerLevel||0.50)){
+    if((comp==='engine_room'||comp==='engineering'||comp==='aft') && (d.h2Level||0) >= (C.player.casualties?.hydrogen?.dangerLevel||0.50)){
       if(Math.random() < (C.player.casualties?.hydrogen?.combatHitIgnition||0.40)){
         // Detonation handled by tickHydrogen's _detonateHydrogen — set h2Level to explosive to trigger next tick
         d.h2Level = 1.0;
@@ -404,7 +440,7 @@ function hit(amount,hitX,hitY,forceComp){
     }
 
     // Shaft seal — combat hit to aft_ends when shaft_seals degraded+
-    if(comp==='aft_ends' && !d.shaftSealLeak){
+    if((comp==='aft_ends'||comp==='engineering') && !d.shaftSealLeak){
       const sealState = STATES.indexOf(d.systems.shaft_seals||'nominal');
       if(sealState >= 1 && Math.random() < (C.player.casualties?.shaftSeal?.combatChance||0.25)){
         d.shaftSealLeak = true;
@@ -430,7 +466,7 @@ function hit(amount,hitX,hitY,forceComp){
     }
 
     // Hydraulic pressure — combat hit to control_room when hyd_main already damaged
-    if(comp==='control_room'){
+    if((comp==='control_room'||comp==='forward'||comp==='midships')){
       const hydIdx=STATES.indexOf(d.systems.hyd_main||'nominal');
       if(hydIdx>=1){
         const hydCfg=C.player.casualties?.hydraulic||{};
@@ -447,7 +483,8 @@ function hit(amount,hitX,hitY,forceComp){
     // Estimate time to flood without DC — account for current depth pressure
     const _bDepthM=Math.max(0,(player.depth||0)-(world?.seaLevel||0));
     const _bPMult=1+Math.min(_bDepthM/120,4);
-    const tFlood=d.floodRate[comp]>0?Math.round(1/(d.floodRate[comp]*_bPMult)):999;
+    const _roomRate=d.roomFloodRate[impactRoom]||0;
+    const tFlood=_roomRate>0?Math.round(1/(_roomRate*_bPMult)):999;
     const urgency=tFlood<60?'CRITICAL — ':tFlood<120?'URGENT — ':'';
     setCasualtyState('emergency');
     _COMMS?.flood.firstHit(SECTION_LABEL[comp], COMP_STATION[comp]||'ENG', urgency, tFlood);
@@ -483,7 +520,7 @@ function hit(amount,hitX,hitY,forceComp){
   // Reactor runaway — severe hit to reactor or primary_coolant
   if(!player.scram && severity>0.6){
     const raCfg=cas.reactorRunaway||{};
-    const hitReactor=comp==='reactor_comp'; // reactor comp hit = reactor systems at risk
+    const hitReactor=(comp==='reactor_comp'||comp==='reactor'); // reactor comp hit = reactor systems at risk
     if(hitReactor && Math.random()<(raCfg.hitChance||0.08)){
       // Loud acoustic transient
       if(typeof _broadcastTransient==='function'){
@@ -542,8 +579,7 @@ function _escapeHalt(){
   // CO's final log entry — contextual, factual, one line of humanity at the end
   const d=p?.damage;
   const depth=Math.round(p?.depth??0);
-  const COMP_NAMES={fore_ends:'torpedo room',control_room:'control room',aux_section:'aux machinery',reactor_comp:'reactor',engine_room:'engine room',aft_ends:'aft ends'};
-  const floodedComps=d?['fore_ends','control_room','aux_section','reactor_comp','engine_room','aft_ends'].filter(cp=>d.flooded[cp]).map(cp=>COMP_NAMES[cp]):[];
+  const floodedComps=d?COMPS.filter(cp=>d.flooded[cp]).map(cp=>COMP_DEF[cp]?.label||cp):[];
   const floodStr=floodedComps.length===0?'structural failure'
     :floodedComps.length===1?`flooding in ${floodedComps[0]}`
     :`flooding in ${floodedComps.slice(0,-1).join(', ')} and ${floodedComps[floodedComps.length-1]}`;
@@ -603,7 +639,7 @@ function _resolveEscape(){
       else c.status='killed';
     }
   }
-  const co=(d.crew.control_room||[]).find(c=>c.rating==='CDR');
+  const co=COMPS.flatMap(comp=>(d.crew[comp]||[])).find(c=>c.rating==='CDR');
   const playerSurvives=co?.status==='killed'?false:Math.random()<Math.min(sc+0.15,0.99);
   d.escapeSurvivors=survivors;
   d.escapePlayerSurvived=playerSurvives;
@@ -627,56 +663,148 @@ function tick(dt){
   // Flood spread through open watertight doors
   _wtdFloodSpread(dt, d, _pressureMult);
 
-  // Progressive flooding
+  // ── Per-room flooding ────────────────────────────────────────────────
+  // Mirrors the fire system: each room has its own flood level (0-1) and
+  // flood rate. Water spreads to adjacent rooms with very high probability
+  // and flows downward automatically (gravity). Section-level flooding is
+  // aggregated from room floods for buoyancy, trim, evacuation, and sinking.
   for(const comp of COMPS){
     if(d.flooded[comp]) continue;
-    const rate=d.floodRate[comp]||0;
+    const roomIds = SECTION_ROOMS[comp]||[];
+    const _vol = COMP_DEF[comp]?.volume || 8;
 
-    // Advance flooding from active breach
-    if(rate>0){
-      d.flooding[comp]=Math.min(1,(d.flooding[comp]||0)+rate*_pressureMult*dt);
-    } else if((d.flooding[comp]||0)>0){
-      // Bilge pumps drain residual water — suppress if an open WTD is actively feeding in
-      const hasActiveSpread=WTD_PAIRS.some(([a,b])=>{
-        const other=(a===comp)?b:(b===comp)?a:null;
-        if(!other) return false;
-        const key=a+'|'+b;
-        return (d.wtd[key]||'open')==='open' &&
-               (d.flooded[other]?1:(d.flooding[other]||0)) > (d.flooding[comp]||0)+0.05;
-      });
-      if(!hasActiveSpread){
-        d.flooding[comp]=Math.max(0,(d.flooding[comp]||0)-0.012*dt);
-        if(d.flooding[comp]<=0){
-          _returnCrew(comp,d);
-          // Reset deck damage tracking so a future flood applies fresh system damage
-          if(d._floodDeckDmg?.[comp]) d._floodDeckDmg[comp]={};
+    // ── Room-level flood progression ──────────────────────────────────
+    // Any room with an active breach fills from the breach.
+    const _anyBreach = roomIds.some(rid=>(d.roomFloodRate[rid]||0)>0);
+    if(!d._roomFloodAlerted) d._roomFloodAlerted={};
+    for(const roomId of roomIds){
+      const prevRf = d.roomFlood[roomId]||0;
+      const roomRate = d.roomFloodRate[roomId]||0;
+      if(roomRate > 0){
+        const roomCols = ROOMS[roomId]?.colSpan || 1;
+        const roomVolScale = 1 / roomCols;
+        d.roomFlood[roomId] = Math.min(1, prevRf + roomRate * _pressureMult * roomVolScale * dt);
+      }
+      // Flood detection comms — fire once per room when flooding first detected.
+      // Flooding is always immediately detectable (bilge alarms), unlike fire.
+      const rf = d.roomFlood[roomId]||0;
+      if(rf >= 0.03 && !d._roomFloodAlerted[roomId]){
+        d._roomFloodAlerted[roomId] = true;
+        const roomLabel = ROOMS[roomId]?.label || roomId;
+        const station = COMP_STATION[comp] || 'ENG';
+        // First room in this section to flood triggers full emergency comms
+        const sectionFirstFlood = !roomIds.some(rid => rid !== roomId && d._roomFloodAlerted[rid]);
+        if(sectionFirstFlood){
+          setCasualtyState('emergency');
+          _COMMS?.flood.firstHit(SECTION_LABEL[comp], station, '', 999);
+          _COMMS?.flood.closeWTDs(SECTION_LABEL[comp]);
+          _emergencyCloseWTDs(d);
         }
       }
+    }
+
+    // ── Room-level flood spread (gravity + differential transfer) ─────
+    // Water TRANSFERS between rooms — leaves the source, enters the target.
+    // Gravity dominates: water drains to the lowest point first.
+    // Upper rooms only stay flooded once rooms below are full and water backs up.
+    for(const roomId of roomIds){
+      const rf = d.roomFlood[roomId]||0;
+      if(rf < 0.02) continue;
+      for(const adjId of (ROOM_ADJ[roomId]||[])){
+        const af = d.roomFlood[adjId]||0;
+        if(af >= 1.0) continue; // target full, can't accept more
+        const adjRoom = ROOMS[adjId];
+        const srcRoom = ROOMS[roomId];
+        if(!adjRoom || !srcRoom) continue;
+        const isBelow = adjRoom.deck > srcRoom.deck;
+        const isAbove = adjRoom.deck < srcRoom.deck;
+
+        // Manned room resistance: crew slow ingress with shoring/portable pumps.
+        const roomCrewCount = adjRoom.crew || 0;
+        const crewResist = Math.min(0.90, roomCrewCount * 0.15);
+
+        let transferAmt = 0;
+        if(isBelow){
+          // Gravity drain — water always prefers the lowest point.
+          // Fast transfer: source drains, target fills. No differential threshold.
+          // Rate scales with how much water is in the source room.
+          const gravityRate = rf * 0.12 * _pressureMult * (1 - crewResist * 0.5);
+          // Only transfer down to equalize — don't overshoot
+          const maxTransfer = Math.max(0, rf - af) * 0.5; // move toward equalization
+          transferAmt = Math.min(gravityRate * dt, maxTransfer, 1 - af);
+        } else if(isAbove){
+          // Upward — only when source room is nearly full (water backs up)
+          if(rf >= 0.85 && rf > af + 0.05){
+            const upRate = (rf - 0.85) * 0.06 * _pressureMult * (1 - crewResist);
+            transferAmt = Math.min(upRate * dt, rf - af, 1 - af);
+          }
+        } else {
+          // Horizontal equalization — water finds its level
+          const diff = rf - af;
+          if(diff > 0.02){
+            const horizRate = diff * 0.06 * _pressureMult * (1 - crewResist);
+            transferAmt = Math.min(horizRate * dt, diff * 0.5, 1 - af);
+          }
+        }
+        if(transferAmt > 0.0001){
+          d.roomFlood[adjId] = Math.min(1, af + transferAmt);
+          // Source room loses the water it transferred (conservation of mass)
+          d.roomFlood[roomId] = Math.max(0, d.roomFlood[roomId] - transferAmt);
+        }
+      }
+    }
+
+    // Bilge pumps — slow drain in rooms without active breach.
+    // Manned rooms drain faster (crew operating portable pumps).
+    for(const roomId of roomIds){
+      const rf = d.roomFlood[roomId]||0;
+      if(rf <= 0 || rf >= 1.0) continue;
+      if((d.roomFloodRate[roomId]||0) > 0) continue; // breach active — can't drain
+      const roomCrew = ROOMS[roomId]?.crew || 0;
+      const drainRate = 0.004 + roomCrew * 0.002; // base + crew boost
+      d.roomFlood[roomId] = Math.max(0, rf - drainRate * dt);
+    }
+
+    // ── Per-room system damage ────────────────────────────────────────
+    // Systems in a flooded room take damage when the room reaches 80%
+    for(const roomId of roomIds){
+      const rf = d.roomFlood[roomId]||0;
+      if(rf < 0.80) continue;
+      if(!d._roomFloodDmg) d._roomFloodDmg = {};
+      if(d._roomFloodDmg[roomId]) continue; // already applied
+      d._roomFloodDmg[roomId] = true;
+      const roomSys = (ROOM_SYSTEMS[roomId]||[]);
+      for(const sys of roomSys){
+        if(d.systems[sys] === 'destroyed') continue;
+        const st = damageSystem(sys);
+        _COMMS?.sys.damaged(SYS_LABEL[sys], st, 0.5);
+      }
+    }
+
+    // ── Aggregate section flooding from rooms ─────────────────────────
+    // Section flood level = weighted average of room floods (by colSpan).
+    // This drives section-level thresholds: evacuation, sinking, buoyancy.
+    let totalWeight = 0, weightedFlood = 0;
+    for(const roomId of roomIds){
+      const w = ROOMS[roomId]?.colSpan || 1;
+      totalWeight += w;
+      weightedFlood += (d.roomFlood[roomId]||0) * w;
+    }
+    const oldFl = d.flooding[comp]||0;
+    d.flooding[comp] = totalWeight > 0 ? weightedFlood / totalWeight : 0;
+
+    // Derive section floodRate from room rates for backward compat consumers
+    const maxRoomRate = Math.max(0, ...roomIds.map(rid => d.roomFloodRate[rid]||0));
+    d.floodRate[comp] = maxRoomRate > 0 ? maxRoomRate : 0;
+    if(d.floodRate[comp] <= 0 && d.flooding[comp] <= 0.01){
     }
 
     // Threshold checks — apply regardless of flood source (breach or WTD spread)
     const fl=d.flooding[comp]||0;
     const isSeep=(d._seepComp||{})[comp];
 
-    // Deck-level system damage — water rises D3→D2→D1 (bottom to top).
-    // Each crossing damages systems on that deck one step.
-    // 'destroyed' can only be reached if the system was already degraded/offline,
-    // since damageSystem always moves exactly one step at a time.
-    if(!d._floodDeckDmg) d._floodDeckDmg={};
-    if(!d._floodDeckDmg[comp]) d._floodDeckDmg[comp]={};
-    const _ddmg=d._floodDeckDmg[comp];
-    if(fl>=0.33&&!_ddmg[2]){                      // D3 (bottom) submerged
-      _ddmg[2]=true;
-      for(const sys of activeSystems(comp)){
-        if((ROOMS[SYS_DEF[sys].room]?.deck??1)===2){ const st=damageSystem(sys); _COMMS?.sys.damaged(SYS_LABEL[sys],st,0.5); }
-      }
-    }
-    if(fl>=0.67&&!_ddmg[1]){                      // D2 (middle) submerged
-      _ddmg[1]=true;
-      for(const sys of activeSystems(comp)){
-        if((ROOMS[SYS_DEF[sys].room]?.deck??1)===1){ const st=damageSystem(sys); _COMMS?.sys.damaged(SYS_LABEL[sys],st,0.5); }
-      }
-    }
+    // Per-room system damage replaces old deck-level damage (see per-room
+    // flood progression above — systems damaged when room reaches 80%).
 
     // 65% — crew evacuation
     if(!isSeep && fl>=0.65 && !(d._evacuated||{})[comp]){
@@ -711,19 +839,15 @@ function tick(dt){
     if(fl>=1.0&&!d.flooded[comp]){
       d.flooded[comp]=true;
       d.floodRate[comp]=0;
-      // D1 (top deck) and one final submerge step for all systems.
-      // damageSystem always moves exactly one step, so 'destroyed' only happens
-      // if the system was already at 'offline' (i.e. previously degraded by combat or earlier flooding).
-      if(!d._floodDeckDmg) d._floodDeckDmg={};
-      if(!d._floodDeckDmg[comp]) d._floodDeckDmg[comp]={};
-      const _ddFull=d._floodDeckDmg[comp];
-      for(const sys of activeSystems(comp)){
-        // D1 systems: first damage event (deck just reached)
-        if((ROOMS[SYS_DEF[sys].room]?.deck??1)===0 && !_ddFull[0]){ damageSystem(sys); }
-        // All systems: one final step for full submersion
-        damageSystem(sys);
+      // Set all rooms in this section to fully flooded and clear breach rates
+      for(const rid of roomIds){
+        d.roomFlood[rid]=1.0;
+        d.roomFloodRate[rid]=0;
       }
-      _ddFull[0]=true;
+      // Final damage step for all systems not already destroyed
+      for(const sys of activeSystems(comp)){
+        if(d.systems[sys]!=='destroyed') damageSystem(sys);
+      }
       const lost=_floodComp(comp);
       if(!d._evacuated) d._evacuated={};
       d._evacuated[comp]=true;
@@ -744,7 +868,7 @@ function tick(dt){
       }
       _alert(`${SECTION_LABEL[comp]} FLOODED`);
       _COMMS?.flood.uncontrolled(SECTION_LABEL[comp], COMP_STATION[comp]||'ENG', lost);
-      if(comp==='reactor_comp'&&!player.scram&&typeof triggerScram==='function'){
+      if((comp==='reactor_comp'||comp==='reactor')&&!player.scram&&typeof triggerScram==='function'){
         triggerScram('damage');
         _COMMS?.flood.reactorFlooded();
       }
@@ -823,8 +947,27 @@ export const DMG = {
   getTrimState,drawHPA,
   toggleWTD,
   relocateCrewForWatch:(watch)=>relocateCrewForWatch(player.damage,watch),
-  COMP_DEF,COMPS,STATES,SYS_LABEL,SYS_DEF,ROOMS,ROOM_IDS,SECTION_ROOMS,ROOM_ADJ,SECTION_SYSTEMS,DIESEL_SECTION_SYSTEMS,activeSystems,ROOM_SYSTEMS,WTD_PAIRS,WTD_RC_KEYS,
-  SECTION_LABEL,SECTION_SHORT,roomSection,effectiveState,
-  COMPARTMENTS:COMPS,
+  // Vessel-specific data: use getters so they always return the current layout
+  get COMP_DEF(){ return COMP_DEF; },
+  get COMPS(){ return COMPS; },
+  get COMPARTMENTS(){ return COMPS; },
+  get SYS_DEF(){ return SYS_DEF; },
+  get SYS_LABEL(){ return SYS_LABEL; },
+  get ROOMS(){ return ROOMS; },
+  get ROOM_IDS(){ return ROOM_IDS; },
+  get SECTION_ROOMS(){ return SECTION_ROOMS; },
+  get ROOM_ADJ(){ return ROOM_ADJ; },
+  get SECTION_SYSTEMS(){ return SECTION_SYSTEMS; },
+  get DIESEL_SECTION_SYSTEMS(){ return DIESEL_SECTION_SYSTEMS; },
+  get ROOM_SYSTEMS(){ return ROOM_SYSTEMS; },
+  get WTD_PAIRS(){ return WTD_PAIRS; },
+  get WTD_RC_KEYS(){ return WTD_RC_KEYS; },
+  get SECTION_LABEL(){ return SECTION_LABEL; },
+  get SECTION_SHORT(){ return SECTION_SHORT; },
+  get COMP_FRACS(){ return COMP_FRACS; },
+  get COMP_LABELS(){ return COMP_LABELS; },
+  // Non-vessel-specific: static values
+  STATES,
+  activeSystems,roomSection,effectiveState,
   CREW_MANIFEST,
 };

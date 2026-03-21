@@ -8,7 +8,11 @@ export const session = {
   started: false,
   missionT: 0,
   scenario: 'waves',
-  vesselKey: '688i',
+  vesselKey: '688',
+
+  // ── Pre-mission loadout ──────────────────────────────────────────────────
+  // Set on the loadout screen, applied during reset()
+  loadout: null,  // { rack: { torp: N, missileKey: N, ... }, tubes: ['torp','torp','harpoon',...], vls: 'tasm' }
 
   // ── Tactical / casualty state ──────────────────────────────────────────────
   tacticalState: 'cruising',   // cruising | patrol | action
