@@ -83,6 +83,8 @@ V1 (subgame2) is the behavioral ground truth. V2 (Steady Bubble) must be functio
 | — Design doc | `docs/vessel-individuality/DESIGN.md` |
 | — Session log | `docs/vessel-individuality/SESSION-LOG.md` |
 | — Decisions (D008-D019) | `docs/vessel-individuality/DECISIONS.md` |
+| **Planned project** | `steadybubble/docs/mission-system/` |
+| — Design doc | `docs/mission-system/DESIGN.md` |
 | **Planned project** | `steadybubble/docs/weapons-expansion/` |
 | — Design doc | `docs/weapons-expansion/DESIGN.md` |
 | **Archived project** | `steadybubble/docs/migration/` |

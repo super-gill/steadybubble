@@ -678,6 +678,68 @@ New `contactState` field on all enemy entities progresses through:
 ### Build status
 Clean build (Vite production, 78 modules). No errors.
 
-### Phase 5 status: COMPLETE — pending testing sign-off
+### Phase 5 status: COMPLETE — signed off by Jason
 
-**Next: Phase 6 — Scenario Redesign** (rebuild scenarios for realistic scale) or range estimation rework
+---
+
+## Session 3 (continued) — Phase 6 Implementation (Scenario Redesign)
+
+### What was done
+
+#### Scenario definition system
+- `SCENARIO_DEFS` object in sim/index.js maps each scenario ID to `{season, spawnX, spawnY}`
+- `resetScenario` reads the definition, sets season (drives weather/tiles), positions player
+- Player spawn position configurable per scenario (fraction of world size)
+
+#### Spawn distances scaled to nautical miles
+All spawn distances converted from old world units to `rand(X,Y) * NM` format.
+
+#### Initial awareness system
+- `giveInitialDatum(e, state, noiseNm)` gives enemies synthetic bearing history, TMA quality, and contact data to sustain a given contactState
+- Creates enough synthetic observations (8 for IDENTIFIED, 5 for CLASSIFIED, 2 for DETECTION) with realistic timestamps
+- Sets `firstDetectionT` to 2 minutes ago to pass time-elapsed requirements
+
+#### Scenarios updated
+
+| Scenario | Season | Enemy Composition | Initial Awareness |
+|----------|--------|-------------------|-------------------|
+| 1v1 Duel | Summer | 1 SSN (20-30nm) | NONE |
+| Wolfpack | Autumn | Waves (30-60nm) | DETECTION |
+| Barrier Transit | Winter | 4 subs + 2 frigates (35-45nm) | CLASSIFIED |
+| SSBN Hunt | Spring | Typhoon + 2 escort SSNs (40-60nm) | Escorts: DETECTION |
+| Ambush | Winter | 2 hunters (10-15nm) + 2 interceptors (15-20nm) | IDENTIFIED |
+| Boss Fight | Summer | 1 Akula (25-35nm) | DETECTION |
+| ASW Taskforce | Autumn | Destroyer + 2 frigates + corvette + 1 SSN (20-30nm) | CLASSIFIED |
+
+#### Contact state persistence fix
+- CLASSIFIED and above never degrades below CLASSIFIED from staleness alone
+- Once a crew confirms a submerged contact, they search that sector permanently
+- Only unconfirmed DETECTION (single noise, might be biologics) can revert to NONE
+
+#### Bug fixes
+- `b.dy/b.dx` → `b.vy/b.vx` in torpedo heading check for counter-fire direction
+- `evadeFrom` now includes torpedo depth for layer exploitation during evasion
+- Debug overlay shows `EVDXXs` when enemy is evading
+
+### Files modified
+| File | Changes |
+|------|---------|
+| `src/sim/index.js` | SCENARIO_DEFS, resetScenario reads definition, player spawn from scenario, torpedo heading fix, evadeFrom depth |
+| `src/sim/scenario.js` | Import player, giveInitialDatum helper, all scenarios updated with nm distances + initial awareness + mixed forces |
+| `src/ai/perception.js` | CLASSIFIED never degrades below CLASSIFIED from staleness |
+| `src/render/index.js` | Debug overlay shows evade state |
+
+### Outstanding design work
+
+**The game is too easy.** The NATO vs Soviet detection asymmetry is historically accurate but makes for one-sided gameplay. The player can detect, track, and engage enemies at 17nm+ without ever being detected. The scenarios need:
+
+1. **Mission objectives** — transit points, patrol areas, launch baskets. Force the player to go somewhere, not sit and snipe.
+2. **ROE system** — classification requirements, weapons hold/tight/free states, penalties for shooting unclassified or civilian contacts.
+3. **Role reversal** — play as Soviet SSBN vs NATO hunters. Completely different gameplay dynamic.
+4. **NATO AI enemies** — for role reversal scenarios. Better sonar, quieter boats, different doctrine.
+
+These require a new design document and proper planning before implementation.
+
+### Phase 6 status: PARTIALLY COMPLETE — scenario structure done, mission system needed
+
+**Next: Mission System Design Document** — design ROE, objectives, mission types, and role reversal before implementing
