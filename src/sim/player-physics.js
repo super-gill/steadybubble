@@ -24,6 +24,7 @@ export function bindPlayerPhysics(deps) {
 // ── Reactor SCRAM tick ──────────────────────────────────────────────────
 
 export function tickReactorScram(dt){
+  if(C.player.noPropulsionCasualties) return;
   if(player.scram && !C.player.isDiesel){
     const wasT = player.scramT;
     player.scramT = Math.max(0, player.scramT - dt);
@@ -95,12 +96,17 @@ export function tickCrashDive(dt){
 // ── Coolant leak system ─────────────────────────────────────────────────
 
 export function tickCoolantLeak(dt){
+  // Skip all propulsion casualties for vessels with no reactor modelling
+  if(C.player.noPropulsionCasualties) return;
   if(!C.player.isDiesel){
   {
     const casCfg=C.player.casualties?.coolantLeak||{};
     if(!player.scram && !player._coolantLeak){
       const atFlank  = player.speed >= (C.player.flankKts||28)*0.90;
-      const atDepth  = player.depth >= (C.world?.layerY2||280) + 60;
+      // Stress threshold uses vessel's safe diving depth, not a fixed layer depth.
+      // Deep-diving boats (Seawolf: 365m safe) can operate deeper before coolant stress.
+      const stressDepth = (C.player.safeDivingDepth || 300) * 1.05;
+      const atDepth  = player.depth >= stressDepth;
       const coolantDegraded = player.damage?.systems?.primary_coolant === 'degraded';
       if(atFlank && atDepth){
         player._flankDepthT = (player._flankDepthT||0) + dt;

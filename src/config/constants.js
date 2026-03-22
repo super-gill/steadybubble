@@ -53,10 +53,10 @@ export const CONFIG = {
     },
     cavitationDepthRef:380, cavitationKtsRef:18, cavitationSlope:0.018, cavitationSpike:0.22,
     torpCd:0.45, cmCd:4.5, cmStock:12, pingCd:9.0, pingPulse:1.25,
-    pingDazzle:     { duration:1.5, range:1800 },
+    pingDazzle:     { duration:1.5, range:370 },   // ~2nm dazzle range
     torpTubes:4, torpStock:32, torpReloadTime:28, fireDelay:4.5,
-    torpArcDeg:55, torpEnableDist:300,
-    torpWireMaxRange:3000, torpWireBreakTurnDeg:90,
+    torpArcDeg:55, torpEnableDist:16,       // ~160m enable distance
+    torpWireMaxRange:2780, torpWireBreakTurnDeg:90,  // ~15nm wire range
     wireMaxLaunchKts:10, wireSafeKts:10, wireStressKts:15,
     wireStressBreakTime:15, wireInstantBreakKts:15,
     periscope:      { cd:10.0, dur:4.5, revealR:3600, detectBoost:1.55, noiseSpike:0.10 },
@@ -119,17 +119,18 @@ export const CONFIG = {
     cz:{ min:4800, max:5500, boost:3.2 },
   },
   tma: {
-    defaultRange:900, minObs:2, goodObs:6, minBaseline:80, goodBaseline:350,
-    maxBearingAge:150, maxBearings:24,
+    defaultRange:900, minObs:2, goodObs:6, minBaseline:4, goodBaseline:18,
+    maxBearingAge:600, maxBearings:40,
     qualityThresholdBlob:0.15, qualityThresholdLabel:0.35,
     qualityThresholdRange:0.35, qualityThresholdSolid:0.70,
   },
   torpedo: {
-    speed:50, approachSpeed:18, life:210, dmg:55,
-    seekRange:520, seekFOV:0.90, passiveFOV:2.4,
-    turnRate:1.55, reacquireChance:0.016, arming:0.30, searchSnake:0.18,
-    seduceFOV:2.80, seduceRange:300, seduceTime:9.5, reacquireDelay:5.5,
+    speed:55, approachSpeed:40, life:1800, dmg:55,
+    seekRange:550, seekFOV:0.90, passiveFOV:2.4,
+    turnRate:1.55, reacquireChance:0.020, arming:12, searchSnake:0.18,
+    seduceFOV:2.80, seduceRange:55, seduceTime:9.5, reacquireDelay:5.5,
     depthRate:2, vertWindow:120, vertFuse:60,
+    wireRange: 2780,
   },
   decoy: {
     noisemakerLifeMin:14.0, noisemakerLifeMax:20.0, noisemakerR:22, sigPlayer:1.4, sigEnemy:1.0,
@@ -137,31 +138,53 @@ export const CONFIG = {
   },
   enemy: {
     boatShare:0.35,
-    hearBoatRange:2000, hearSubRange:2200, hearSignalMin:0.04, hearPBase:0.025, hearPScale:1.5,
+    hearBoatRange:2000, hearSubRange:2200, // legacy — bypassed by propagation model
+    hearSignalMin:0.04, hearPBase:0.025, hearPScale:1.5,
     deafStartKts:3, deafFullKts:8, deafnessCeil:0.92,
-    wolfpackDatumRange:3500,
-    fireTransientRange:1800, fireTransientSus:0.45,
+    wolfpackDatumRange:3500,              // ~19nm — reasonable for wolfpack comms
+    fireTransientRange:3700,              // ~20nm — torpedo launch transient heard at range
+    fireTransientSus:0.45,
     susInvestigate:0.22, susEngage:0.78,
-    quietNoiseThreshold:0.14, susDecayBase:0.003, susDecayQuietExtra:0.006,
-    contactMaxAge:20.0, contactMaxAgeQuiet:12.0,
-    fireMinSus:0.62, fireMaxAge:14.0, fireMinStrength:0.45,
+    quietNoiseThreshold:0.14,
+    susDecayBase:0.002, susDecayQuietExtra:0.004,   // slower decay — contacts persist longer
+    contactMaxAge:120.0, contactMaxAgeQuiet:60.0,   // 2 min / 1 min — realistic prosecution time
+    fireMinSus:0.65, fireMaxAge:90.0, fireMinStrength:0.35, // longer contact validity for fire
     boatFireEngage:[22,35], boatFireOther:[50,80],
-    boatTorpStock:6, boatTorpSpeed:38, boatTorpLife:90, boatTorpDmg:28, boatTorpSeek:380,
-    subFireEngage:[1.2,2.2], subFireOther:[3.5,6.0],
-    subNavT:[120,280], subPingCd:[14.0,26.0], subPingRange:2200,
-    subNoiseMin:0.62, subNoiseMax:0.90,
+    boatTorpStock:6, boatTorpSpeed:35, boatTorpLife:1200, boatTorpDmg:28, boatTorpSeek:380,
+    subFireEngage:[8,15], subFireOther:[20,40],      // slower fire rate — deliberate shots
+    subNavT:[180,400], subPingCd:[30,60], subPingRange:2200,
+    subNoiseMin:0.15, subNoiseMax:0.45,              // Soviet subs: quieter floor for realism
     subSprintKtsMin:13, subSprintKtsMax:18,
     subTorpReactR:1600, boatTorpReactR:400,
-    subTorpArcDeg:55, subTubes:2, subTorpStock:6, subReloadTime:40,
-    subTorpSpeed:40, subTorpApproachSpeed:14, subTorpSeekRange:340,
-    subTorpReacquire:0.008, subTorpLife:180,
+    subTorpArcDeg:55, subTubes:2, subTorpStock:6, subReloadTime:55,  // slower reload
+    subTorpSpeed:40, subTorpApproachSpeed:30, subTorpSeekRange:400,
+    subTorpReacquire:0.010, subTorpLife:1800,        // 30 min endurance
     counterFire: {
-      reactionDelay:[2.0,4.0], staggerDelay:[1.5,3.0],
+      reactionDelay:[8.0,15.0], staggerDelay:[3.0,8.0],  // slower reaction — realistic
       maxInitial:2, panicBlurMult:2.5, iterCount:4,
     },
     evasion: {
       skipLayerChance:0.25, sprint2ArcMin:60, sprint2ArcMax:180,
       boldManeuverChance:0.15, knuckleDurMin:3, knuckleDurMax:10,
+    },
+    classification: {
+      detectionMinObs:     1,     // bearings needed for DETECTION
+      classifyMinObs:      3,     // bearings needed for CLASSIFIED
+      classifyMinTime:     15,    // seconds from first detection
+      classifyTmaQ:        0.10,  // min TMA quality for CLASSIFIED
+      identifyMinObs:      5,     // bearings needed for IDENTIFIED
+      identifyMinTime:     45,    // seconds from first detection
+      identifyTmaQ:        0.18,  // min TMA quality for IDENTIFIED
+      trackingTmaQ:        0.28,  // min TMA quality for TRACKING (role-adjusted)
+      trackingDropTmaQ:    0.20,  // below this: TRACKING → IDENTIFIED
+      identifyDropTmaQ:    0.08,  // below this: IDENTIFIED → CLASSIFIED
+      // Give-up timers — how long a crew listens before deciding it was nothing.
+      // These are LONG — a real crew doesn't forget a contact in seconds.
+      staleDetectionAge:   600,   // 10 min: one bearing, listened hard, nothing else → biologics
+      staleClassifiedAge:  900,   // 15 min: had multiple bearings, lost them → search bearing
+      staleIdentifiedAge:  1200,  // 20 min: knew it was hostile, lost it → expanded search
+      staleTrackingAge:    300,   // 5 min: had a solution, lost quality → revert to prosecution
+      contactLostAge:      1200,  // 20 min total silence → give up entirely
     },
     adaptation: {
       blurReductionPerMiss:0.15, blurFloor:0.50,
@@ -174,12 +197,12 @@ export const CONFIG = {
       sectorArcDeg:90, sectorExpandRate:1.5, datumHoldTime:120,
     },
     asroc: {
-      minRange:300, maxRange:2800, rocketSpeed:200, deployDepth:45,
+      minRange:185, maxRange:930, rocketSpeed:80, deployDepth:45,  // ~1-5nm range, realistic ASROC
       fireCd:[25,40], susThresh:0.48, contactMaxAge:30,
     },
-    spawnMinR:1500, spawnMaxR:2500,
-    waveSpawnMinR:4000, waveSpawnMaxR:6000,
-    waveFormationSpread:1200, waveDelay:30.0,
+    spawnMinR:3700, spawnMaxR:7400,   // 20-40nm in world units
+    waveSpawnMinR:5500, waveSpawnMaxR:11000, // 30-60nm
+    waveFormationSpread:1800, waveDelay:30.0,
     waveComps:[
       ['hunter','hunter'],
       ['pinger','hunter','hunter'],
@@ -197,55 +220,59 @@ export const CONFIG = {
     mk48_adcap: {
       kind:'torpedo', label:'MK-48 ADCAP', shortLabel:'ADCAP',
       role:'Heavyweight torpedo', desc:'Wire-guided heavyweight torpedo with active/passive seeker. Primary anti-submarine and anti-surface weapon for US submarines.',
-      speed:50, approachSpeed:18, life:210, dmg:55,
-      seekRange:520, seekFOV:0.90, passiveFOV:2.4,
-      turnRate:1.55, reacquireChance:0.016, arming:0.30, searchSnake:0.18,
-      seduceFOV:2.80, seduceRange:300, seduceTime:9.5, reacquireDelay:5.5,
+      speed:55, approachSpeed:40, life:1800, dmg:55,   // 50km range, ~30 min endurance
+      seekRange:550, seekFOV:0.90, passiveFOV:2.4,     // ~3nm active seeker
+      turnRate:1.55, reacquireChance:0.020, arming:12, searchSnake:0.18,  // arms at ~350m
+      seduceFOV:2.80, seduceRange:55, seduceTime:9.5, reacquireDelay:5.5, // ADCAP has good ECCM
       depthRate:2, vertWindow:120, vertFuse:60,
+      wireRange: 2780,  // ~15nm practical wire guidance range
     },
     spearfish: {
       kind:'torpedo', label:'SPEARFISH', shortLabel:'SPEARFISH',
       role:'Heavyweight torpedo', desc:'Royal Navy wire-guided heavyweight torpedo. Fastest NATO torpedo at 70+ knots with superior ECCM and hard-kill capability.',
-      speed:70, approachSpeed:20, life:280, dmg:60,
-      seekRange:600, seekFOV:0.95, passiveFOV:2.5, turnRate:1.65,
-      reacquireChance:0.020, arming:0.28, searchSnake:0.16,
-      seduceFOV:2.80, seduceRange:300, seduceTime:8.0, reacquireDelay:4.0,
+      speed:70, approachSpeed:40, life:1800, dmg:60,   // 65km range, ~30 min endurance
+      seekRange:650, seekFOV:0.95, passiveFOV:2.5, turnRate:1.65,
+      reacquireChance:0.025, arming:10, searchSnake:0.16,
+      seduceFOV:2.80, seduceRange:45, seduceTime:8.0, reacquireDelay:4.0, // best ECCM
       depthRate:2, vertWindow:120, vertFuse:60,
+      wireRange: 2780,  // ~15nm
     },
     tigerfish: {
       kind:'torpedo', label:'TIGERFISH Mk 24', shortLabel:'TIGERFISH',
       role:'Heavyweight torpedo', desc:'1970s-era Royal Navy wire-guided torpedo. Reliable but slow at 35 knots. Inferior ECCM makes it susceptible to countermeasures.',
-      speed:35, approachSpeed:12, life:300, dmg:45,
-      seekRange:340, seekFOV:0.75, passiveFOV:2.1, turnRate:1.25,
-      reacquireChance:0.008, arming:0.35, searchSnake:0.22,
-      seduceFOV:2.80, seduceRange:300, seduceTime:14.0, reacquireDelay:8.5,
+      speed:35, approachSpeed:25, life:1800, dmg:45,   // 35km range, ~30 min
+      seekRange:370, seekFOV:0.75, passiveFOV:2.1, turnRate:1.25,
+      reacquireChance:0.008, arming:15, searchSnake:0.22,
+      seduceFOV:2.80, seduceRange:90, seduceTime:14.0, reacquireDelay:8.5, // poor ECCM
       depthRate:2, vertWindow:120, vertFuse:60,
+      wireRange: 1850,  // ~10nm — older wire system
     },
     sst4: {
       kind:'torpedo', label:'SST-4 / SUT', shortLabel:'SST-4',
-      role:'Heavyweight torpedo', desc:'German wire-guided export torpedo. Moderate speed at 38 knots. Reliable and widely deployed across 14+ navies.',
-      speed:38, approachSpeed:13, life:260, dmg:50,
+      role:'Heavyweight torpedo', desc:'German wire-guided export torpedo. Moderate speed at 35 knots. Reliable and widely deployed across 14+ navies.',
+      speed:35, approachSpeed:25, life:1800, dmg:50,   // 28km range, ~30 min
       seekRange:380, seekFOV:0.82, passiveFOV:2.2, turnRate:1.35,
-      reacquireChance:0.010, arming:0.32, searchSnake:0.20,
-      seduceFOV:2.80, seduceRange:300, seduceTime:12.0, reacquireDelay:7.0,
+      reacquireChance:0.010, arming:14, searchSnake:0.20,
+      seduceFOV:2.80, seduceRange:80, seduceTime:12.0, reacquireDelay:7.0,
       depthRate:2, vertWindow:120, vertFuse:60,
+      wireRange: 1850,  // ~10nm
     },
     harpoon: {
       kind:'missile', label:'UGM-84 HARPOON', shortLabel:'HARPOON',
-      role:'Anti-ship missile', desc:'Tube-launched anti-ship cruise missile. Sea-skimming active radar seeker. Launch depth limited to 25m.',
-      speed:450, range:25000, seekerFOV:0.698, warheadDmg:85,
+      role:'Anti-ship missile', desc:'Tube-launched anti-ship cruise missile. Sea-skimming active radar seeker. ~120km range. Launch depth limited to 25m.',
+      speed:24, range:12040, seekerFOV:0.698, warheadDmg:85,  // 0.9 Mach ≈ 24 wu/s, 65nm range
       reloadMult:1.5, vls:false, maxLaunchDepth:25,
     },
     sub_harpoon: {
       kind:'missile', label:'UGM-84 SUB-HARPOON', shortLabel:'S-HARPOON',
       role:'Anti-ship missile', desc:'Royal Navy variant of Harpoon. Tube-launched anti-ship cruise missile with active radar seeker.',
-      speed:450, range:25000, seekerFOV:0.698, warheadDmg:85,
+      speed:24, range:12040, seekerFOV:0.698, warheadDmg:85,
       reloadMult:1.5, vls:false, maxLaunchDepth:25,
     },
     tasm: {
       kind:'missile', label:'BGM-109B TASM', shortLabel:'TASM',
-      role:'Anti-ship cruise missile', desc:'Tomahawk Anti-Ship Missile. Long-range sea-skimming cruise missile with radar seeker. Tube or VLS launch. Retired ~1994.',
-      speed:400, range:999999, seekerFOV:0.611, warheadDmg:120,
+      role:'Anti-ship cruise missile', desc:'Tomahawk Anti-Ship Missile. Long-range sea-skimming cruise missile with radar seeker. ~460km range. Tube or VLS launch. Retired ~1994.',
+      speed:20, range:46300, seekerFOV:0.611, warheadDmg:120,  // 0.72 Mach ≈ 20 wu/s, 250nm range
       reloadMult:1.8, vls:true, tubeLaunch:true, maxLaunchDepth:30,
     },
     tlam: {
@@ -282,8 +309,8 @@ export const CONFIG = {
     },
     sm39: {
       kind:'missile', label:'SM39 EXOCET', shortLabel:'EXOCET',
-      role:'Anti-ship missile', desc:'Submarine-launched Exocet. Encapsulated missile launched from torpedo tube at up to 55m depth. Short range but can fire deep.',
-      speed:370, range:9000, seekerFOV:0.524, warheadDmg:65,
+      role:'Anti-ship missile', desc:'Submarine-launched Exocet. Encapsulated missile launched from torpedo tube at up to 55m depth. ~50km range.',
+      speed:26, range:5000, seekerFOV:0.524, warheadDmg:65,  // 0.93 Mach ≈ 26 wu/s, 27nm range
       reloadMult:1.5, vls:false, maxLaunchDepth:55,
     },
   },
@@ -291,7 +318,7 @@ export const CONFIG = {
     tracerLife:[0.06,0.14], tracerSpread:0.06, tracerBursts:[2,4],
   },
   visuals:{ screenBubbles:false },
-  layout:{ panelH:190, depthStripW:88, uiScaleDefault:1.0 },
+  layout:{ panelH:220, depthStripW:88, uiScaleDefault:1.0 },
 };
 
 // ── Weapon type helper ──────────────────────────────────────────────────

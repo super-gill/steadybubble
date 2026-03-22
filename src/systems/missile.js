@@ -3,13 +3,14 @@
 import { CONFIG } from '../config/constants.js';
 import { rand, clamp } from '../utils/math.js';
 
-const SEEKER_ACTIVATE_RANGE = 800;
-const SEEKER_RANGE          = 1200;
-const SEEKER_TIMEOUT        = 8.0;
-const HIT_RADIUS            = 28;
-const ASCEND_DUR            = 1.8;
-const TURN_RATE             = 2.8;
-const MIN_WAYPOINT_RANGE    = SEEKER_ACTIVATE_RANGE + 1200;
+// Missile seeker ranges in world units (1 wu ≈ 10m)
+const SEEKER_ACTIVATE_RANGE = 370;   // ~2nm — seeker goes active near waypoint
+const SEEKER_RANGE          = 550;   // ~3nm — active radar seeker range
+const SEEKER_TIMEOUT        = 12.0;  // seconds to find target before self-destruct
+const HIT_RADIUS            = 5;     // ~50m — terminal hit radius
+const ASCEND_DUR            = 3.0;   // seconds to reach cruise altitude
+const TURN_RATE             = 2.0;   // rad/s — sea-skimmer turn rate
+const MIN_WAYPOINT_RANGE    = SEEKER_ACTIVATE_RANGE + 550;
 
 export function create(type, fromX, fromY, ascmSolution) {
   const cfg = CONFIG.weapons?.[type];

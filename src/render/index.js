@@ -47,7 +47,7 @@ function draw(){
   const DPR = _DPR;
   const {doodleLine,doodleCircle,doodleText,w2s,wScale,PANEL_H,STRIP_W,U} = _R;
   const {drawLand,drawRoute,drawPlayerTopDown,drawEnemySubTopDown,drawEnemyBoatTopDown,drawTorpedoTopDown} = _RWORLD;
-  const {drawDepthStrip,drawThreatBar,drawNavCompass} = _RHUD;
+  const {drawDepthStrip,drawThreatBar,drawNavCompass,drawTimeCompression} = _RHUD;
   const {drawStartScreen,drawLogPanel,drawDcPanel,drawDamagePanel,drawCrewPanel,drawDamageScreen,drawPanel,drawEndScreen} = _RPANEL;
 
   const W=canvas.width, H=canvas.height;
@@ -78,29 +78,39 @@ function draw(){
     }
   }
 
-  const seaColour=_MAPS?.getMap()?.seaColour||'#daeaf7';
-  ctx.fillStyle=seaColour;
-  ctx.fillRect(0,0,W,H);
-
-  // ── Adaptive grid — spacing scales with zoom ────────────────────────────
-  const gridCandidates=[50,100,185,370,500,926,1000,1852,5000];
-  let gridSpacing=1000;
-  for(const g of gridCandidates){
-    const px=g*Z;
-    if(px>=70){ gridSpacing=g; break; }
-  }
+  // ── Background: grey outside world bounds, sea colour inside ─────────────
   const cx=(W-STRIP_W)/2, cy=(H-panelH)/2;
-  ctx.strokeStyle='rgba(17,24,39,0.05)';
+  ctx.fillStyle='rgba(40,45,55,1.0)'; // grey outside world
+  ctx.fillRect(0,0,W,H);
+  // Draw sea area clipped to world bounds
+  const seaColour=_MAPS?.getMap()?.seaColour||'#daeaf7';
+  const wxLeft=cx+(0-cam.x)*Z;
+  const wyTop=cy+(0-cam.y)*Z;
+  const wxRight=cx+(world.w-cam.x)*Z;
+  const wyBot=cy+(world.h-cam.y)*Z;
+  ctx.fillStyle=seaColour;
+  ctx.fillRect(Math.max(0,wxLeft), Math.max(0,wyTop),
+    Math.min(W,wxRight)-Math.max(0,wxLeft),
+    Math.min(H,wyBot)-Math.max(0,wyTop));
+
+  // ── Fixed 1nm grid ──────────────────────────────────────────────────────
+  const gridSpacing=185.2; // 1nm in world units — always
+  ctx.strokeStyle='rgba(17,24,39,0.06)';
   ctx.lineWidth=1;
-  const startX=Math.floor((cam.x-cx/Z)/gridSpacing)*gridSpacing;
-  const startY=Math.floor((cam.y-cy/Z)/gridSpacing)*gridSpacing;
-  for(let gx=startX;gx<startX+W/Z+gridSpacing;gx+=gridSpacing){
+  // Only draw grid lines within world bounds and visible on screen
+  const viewLeft=Math.max(0, cam.x-cx/Z);
+  const viewRight=Math.min(world.w, cam.x+cx/Z);
+  const viewTop=Math.max(0, cam.y-cy/Z);
+  const viewBot=Math.min(world.h, cam.y+cy/Z);
+  const startX=Math.floor(viewLeft/gridSpacing)*gridSpacing;
+  const startY=Math.floor(viewTop/gridSpacing)*gridSpacing;
+  for(let gx=startX;gx<=viewRight;gx+=gridSpacing){
     const sx=cx+(gx-cam.x)*Z;
-    ctx.beginPath(); ctx.moveTo(sx,0); ctx.lineTo(sx,H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx,Math.max(0,wyTop)); ctx.lineTo(sx,Math.min(H,wyBot)); ctx.stroke();
   }
-  for(let gy=startY;gy<startY+H/Z+gridSpacing;gy+=gridSpacing){
+  for(let gy=startY;gy<=viewBot;gy+=gridSpacing){
     const sy=cy+(gy-cam.y)*Z;
-    ctx.beginPath(); ctx.moveTo(0,sy); ctx.lineTo(W,sy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(Math.max(0,wxLeft),sy); ctx.lineTo(Math.min(W,wxRight),sy); ctx.stroke();
   }
 
   // ── Nautical mile scale bar — bottom-left of chart area ─────────────────
@@ -561,6 +571,7 @@ function draw(){
 
   // ── Nav compass (after panel so btn2 registrations aren't cleared) ────────
   drawNavCompass(W,H,panelH);
+  drawTimeCompression(W,H);
 
   // ── Message log board
   drawLogPanel(W,H,panelH);
@@ -687,12 +698,14 @@ function draw(){
       ctx.moveTo(ex,ey-r); ctx.lineTo(ex,ey+r);
       ctx.stroke();
       ctx.beginPath(); ctx.arc(ex,ey,r*0.45,0,Math.PI*2); ctx.stroke();
-      const spd=Math.round(Math.hypot(e.vx||0,e.vy||0));
+      const spd=Math.round(Math.hypot(e.vx||0,e.vy||0) / (185.2/3600));
       const sus=Math.round((e.suspicion||0)*100);
       const role=e.role?` [${e.role.slice(0,3).toUpperCase()}]`:'';
       const noisePart=session.debugNoise
         ?` n=${(e.noise??0).toFixed(2)}(f=${(e._noiseFloor??0).toFixed(2)})`:'';
-      const label=`${e.type.toUpperCase()}${role} ${spd}kt sus${sus}%${noisePart}`;
+      const csLabel=(e.contactState||'NONE').slice(0,5);
+      const evLabel=e.evadeT>0?` EVD${Math.round(e.evadeT)}s`:'';
+      const label=`${e.type.toUpperCase()}${role} ${spd}kt [${csLabel}]${evLabel} sus${sus}%${noisePart}`;
       ctx.font=`${U(8)}px ui-monospace,monospace`;
       ctx.textAlign='left';
       ctx.fillStyle='rgba(255,0,220,0.90)';

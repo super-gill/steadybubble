@@ -43,7 +43,7 @@ import { PANEL, wirePanel, _bindPanel, _bindRoute } from './ui/panel.js';
 // ── Render ────────────────────────────────────────────────────────────────
 import { R, bindRenderCanvas } from './render/render-utils.js';
 import { RWORLD, _bindRenderWorld } from './render/render-world.js';
-import { RHUD, _bindRenderHud } from './render/render-hud.js';
+import { RHUD, _bindRenderHud, setHudPanel } from './render/render-hud.js';
 import { RPANEL, _bindRenderPanel } from './render/render-panel.js';
 import { draw, _bindRender } from './render/index.js';
 
@@ -121,6 +121,7 @@ _bindSim({
 // Render bindings
 _bindRenderWorld({ ctx, canvas, DPR, R, MAPS, route });
 _bindRenderHud({ ctx, DPR, R, PANEL });
+setHudPanel(PANEL);
 _bindRenderPanel({
   ctx, canvas, DPR, R, COMMS, AI, DMG, PANEL,
   wirePanel,

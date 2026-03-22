@@ -4,7 +4,11 @@
 import { CONFIG } from '../config/constants.js';
 import { clamp } from '../utils/math.js';
 import { world, player, bullets, sonarContacts, enemies } from '../state/sim-state.js';
+import { session } from '../state/session-state.js';
 import { THEME } from '../ui/theme.js';
+import { seabedDepthAt } from '../systems/ocean.js';
+import { env, initEnvironment } from '../systems/ocean-environment.js';
+import { activeLocation } from '../systems/ocean.js';
 
 const C = CONFIG;
 const TH = THEME;
@@ -42,34 +46,69 @@ function drawDepthStrip(W,H,panelH){
   doodleText('DEPTH',stripX+stripW/2,padT-U(18),U(9),'center');
 
   const playerD=player.depth||0;
-  const halfWin=400;
-  let winTop=Math.max(0, playerD-halfWin);
-  let winBot=Math.min(world.ground, playerD+halfWin);
-  if(winBot-winTop<800){
-    if(winTop===0) winBot=Math.min(world.ground,800);
-    else winTop=Math.max(0,winBot-800);
-  }
-  const winRange=winBot-winTop;
+  const localSeabed=seabedDepthAt(player.wx, player.wy);
+
+  // Centre-follow depth strip: fixed 800m view window.
+  // Sub stays centred. Bar scrolls. At extremes the indicator moves.
+  const viewRange = 800; // always 800m window, never changes
+  const halfRange = viewRange / 2;
+
+  // Centre on player, clamp to surface (0) and seabed
+  const seabedMax = localSeabed + 50; // small margin below seabed
+  let winTop = playerD - halfRange;
+  let winBot = playerD + halfRange;
+
+  // Clamp: don't scroll above surface
+  if (winTop < 0) { winTop = 0; winBot = viewRange; }
+  // Clamp: don't scroll below seabed
+  if (winBot > seabedMax) { winBot = seabedMax; winTop = Math.max(0, seabedMax - viewRange); }
+
+  const winRange = winBot - winTop;
 
   function dToY(d){ return padT+clamp((d-winTop)/winRange,0,1)*stripH; }
 
-  // Layer band
-  const ly1=dToY(world.layerY1), ly2=dToY(world.layerY2);
-  if(ly2>padT && ly1<padT+stripH){
-    ctx.fillStyle='rgba(99,102,241,0.09)';
-    ctx.fillRect(stripX,Math.max(padT,ly1),stripW,Math.min(padT+stripH,ly2)-Math.max(padT,ly1));
-    if(ly1>=padT&&ly1<=padT+stripH){
-      ctx.strokeStyle='rgba(99,102,241,0.35)';
+  // Thermal layer — only render if a thermocline exists (strength > 0)
+  const layerStrength = env.propagation.layerStrength || 0;
+  const layerDepth = env.propagation.layerDepth || 0;
+
+  if(layerStrength > 0.05 && layerDepth < localSeabed - 30){
+    const thermBottom = Math.min(env.propagation._tileBottomDepth || env.svp.thermoclineBottom || layerDepth + 200, localSeabed - 20);
+    const ly = dToY(layerDepth);
+    const lyBot = dToY(thermBottom);
+
+    // Shade the thermocline band — opacity scales with strength
+    if(ly < padT+stripH && lyBot > padT){
+      const shadeTop = Math.max(padT, ly);
+      const shadeBot = Math.min(padT+stripH, lyBot);
+      const alpha = (0.04 + layerStrength * 0.06).toFixed(3);
+      ctx.fillStyle=`rgba(99,102,241,${alpha})`;
+      ctx.fillRect(stripX, shadeTop, stripW, shadeBot - shadeTop);
+    }
+
+    // Top line — layer boundary
+    if(ly >= padT && ly <= padT+stripH){
+      const lineAlpha = (0.25 + layerStrength * 0.30).toFixed(2);
+      ctx.strokeStyle=`rgba(99,102,241,${lineAlpha})`;
       ctx.lineWidth=1;
       ctx.setLineDash([3,3]);
-      ctx.beginPath(); ctx.moveTo(stripX,ly1); ctx.lineTo(W,ly1); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(stripX,ly); ctx.lineTo(W,ly); ctx.stroke();
       ctx.setLineDash([]);
-      doodleText('LAYER',stripX+4,ly1-3,U(7),'left');
+      doodleText(`LAYER ${Math.round(layerDepth)}m`,stripX+4,ly-3,U(7),'left');
+    }
+
+    // Bottom line — thermocline bottom (fainter)
+    if(lyBot >= padT && lyBot <= padT+stripH && thermBottom < localSeabed - 20){
+      ctx.strokeStyle='rgba(99,102,241,0.20)';
+      ctx.lineWidth=1;
+      ctx.setLineDash([2,4]);
+      ctx.beginPath(); ctx.moveTo(stripX,lyBot); ctx.lineTo(W,lyBot); ctx.stroke();
+      ctx.setLineDash([]);
     }
   }
 
-  // Seabed
-  const groundY=dToY(world.ground);
+  // Seabed (from local bathymetry)
+  const groundY=dToY(localSeabed);
+
   if(groundY<padT+stripH+2){
     ctx.fillStyle='rgba(17,24,39,0.10)';
     ctx.fillRect(stripX,groundY,stripW,(padT+stripH)-groundY+2);
@@ -177,9 +216,15 @@ function drawDepthStrip(W,H,panelH){
 function drawThreatBar(W){
   const ctx = _ctx;
   const {doodleText,STRIP_W,U} = _R;
-  let maxSus=0;
-  for(const e of enemies) maxSus=Math.max(maxSus,e.suspicion||0);
-  const state=maxSus>C.enemy.susEngage?'ALERT':maxSus>C.enemy.susInvestigate?'SEARCH':'CLEAR';
+  // Threat bar driven by worst enemy contact state
+  const CS_RANK={NONE:0,DETECTION:1,CLASSIFIED:2,IDENTIFIED:3,TRACKING:4};
+  let worstCS='NONE';
+  for(const e of enemies){
+    if(!e.dead && (CS_RANK[e.contactState]||0)>(CS_RANK[worstCS]||0)) worstCS=e.contactState;
+  }
+  const state=(worstCS==='TRACKING'||worstCS==='IDENTIFIED')?'ALERT'
+    :(worstCS==='CLASSIFIED'||worstCS==='DETECTION')?'SEARCH':'CLEAR';
+  const maxSus=(CS_RANK[worstCS]||0)/4; // 0-1 for bar fill
   const col=state==='ALERT'?TH.color.threat.alert:state==='SEARCH'?TH.color.threat.search:TH.color.threat.clear;
   const stripW=STRIP_W;
 
@@ -385,7 +430,108 @@ function drawNavCompass(W,H,panelH){
   ctx.restore();
 }
 
+// ── Time Compression Controls (above compass) ────────────────────────────────
+function drawTimeCompression(W,H){
+  const ctx = _ctx;
+  const {STRIP_W,U} = _R;
+  const stripW=STRIP_W;
+
+  const speeds = [1, 2, 6, 9];
+  const labels = ['1×', '2×', '6×', '9×'];
+  const btnW = U(28);
+  const btnH = U(18);
+  const gap = U(4);
+  const totalW = speeds.length * btnW + (speeds.length - 1) * gap;
+
+  // Position: right-aligned above compass
+  const rightEdge = W - stripW - U(50);
+  const startX = rightEdge - totalW;
+  const y = U(12);
+
+  // Label
+  ctx.fillStyle = 'rgba(180,200,230,0.50)';
+  ctx.font = `${U(8)}px ui-monospace,monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText('TIME', startX - U(6), y + btnH * 0.65);
+
+  const current = session.timeCompression || 1;
+
+  for (let i = 0; i < speeds.length; i++) {
+    const bx = startX + i * (btnW + gap);
+    const isActive = current === speeds[i];
+
+    ctx.fillStyle = isActive ? 'rgba(30,90,160,0.80)' : 'rgba(25,35,55,0.50)';
+    ctx.beginPath(); ctx.roundRect(bx, y, btnW, btnH, U(3)); ctx.fill();
+
+    if (isActive) {
+      ctx.strokeStyle = 'rgba(80,160,255,0.70)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(bx, y, btnW, btnH, U(3)); ctx.stroke();
+    }
+
+    ctx.fillStyle = isActive ? 'rgba(200,230,255,0.95)' : 'rgba(160,180,200,0.70)';
+    ctx.font = `bold ${U(9)}px ui-monospace,monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(labels[i], bx + btnW / 2, y + btnH * 0.68);
+
+    // Click handler
+    const spd = speeds[i];
+    _PANEL_REF?.registerBtn?.(bx, y, btnW, btnH, () => { session.timeCompression = spd; });
+  }
+
+  // Show current compression if not 1×
+  if (current > 1) {
+    const pulse = 0.6 + 0.4 * Math.sin(performance.now() * 0.004);
+    ctx.fillStyle = `rgba(80,180,255,${pulse})`;
+    ctx.font = `bold ${U(10)}px ui-monospace,monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(`${current}× SPEED`, rightEdge - totalW / 2, y + btnH + U(14));
+  }
+
+  // ── Season selector (dev/test) ──────────────────────────────────────
+  const seasons = ['winter', 'spring', 'summer', 'autumn'];
+  const seasonLabels = ['WIN', 'SPR', 'SUM', 'AUT'];
+  const sBtnW = U(28);
+  const sBtnH = U(16);
+  const sGap = U(3);
+  const sTotalW = seasons.length * sBtnW + (seasons.length - 1) * sGap;
+  const sStartX = rightEdge - sTotalW;
+  const sY = y + btnH + U(6);
+
+  ctx.fillStyle = 'rgba(180,200,230,0.50)';
+  ctx.font = `${U(7)}px ui-monospace,monospace`;
+  ctx.textAlign = 'right';
+  ctx.fillText('SEASON', sStartX - U(6), sY + sBtnH * 0.65);
+
+  for (let i = 0; i < seasons.length; i++) {
+    const sx = sStartX + i * (sBtnW + sGap);
+    const isActive = env.season === seasons[i];
+
+    ctx.fillStyle = isActive ? 'rgba(30,120,80,0.80)' : 'rgba(25,35,55,0.50)';
+    ctx.beginPath(); ctx.roundRect(sx, sY, sBtnW, sBtnH, U(3)); ctx.fill();
+
+    if (isActive) {
+      ctx.strokeStyle = 'rgba(80,200,120,0.70)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.roundRect(sx, sY, sBtnW, sBtnH, U(3)); ctx.stroke();
+    }
+
+    ctx.fillStyle = isActive ? 'rgba(200,255,220,0.95)' : 'rgba(160,180,200,0.70)';
+    ctx.font = `bold ${U(8)}px ui-monospace,monospace`;
+    ctx.textAlign = 'center';
+    ctx.fillText(seasonLabels[i], sx + sBtnW / 2, sY + sBtnH * 0.68);
+
+    const ssn = seasons[i];
+    _PANEL_REF?.registerBtn?.(sx, sY, sBtnW, sBtnH, () => {
+      const loc = activeLocation();
+      if (loc) initEnvironment(loc, ssn);
+    });
+  }
+}
+
+// ── Panel reference for button registration ──────────────────────────────────
+let _PANEL_REF = null;
+export function setHudPanel(panel) { _PANEL_REF = panel; }
+
 // ════════════════════════════════════════════════════════════════════════
 // EXPORT (mirrors V1 window.RHUD shape)
 // ════════════════════════════════════════════════════════════════════════
-export const RHUD = {drawDepthStrip,drawThreatBar,drawNavCompass};
+export const RHUD = {drawDepthStrip,drawThreatBar,drawNavCompass,drawTimeCompression};

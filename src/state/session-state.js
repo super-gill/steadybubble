@@ -14,6 +14,9 @@ export const session = {
   // Set on the loadout screen, applied during reset()
   loadout: null,  // { rack: { torp: N, missileKey: N, ... }, tubes: ['torp','torp','harpoon',...], vls: 'tasm' }
 
+  // ── Time compression ──────────────────────────────────────────────────────
+  timeCompression: 1,          // 1 = real-time, 2 = 2×, 6 = 6×, 9 = 9×
+
   // ── Tactical / casualty state ──────────────────────────────────────────────
   tacticalState: 'cruising',   // cruising | patrol | action
   casualtyState: 'normal',     // normal | emergency | escape

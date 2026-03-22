@@ -36,8 +36,8 @@ const sh = {
   cavitationDepthRef:380, cavitationSlope:0.018, cavitationSpike:0.22,
   torpCd:0.45, cmCd:4.5, pingCd:9.0, pingPulse:1.25,
   pingDazzle:    { duration:1.5, range:1800 },
-  torpArcDeg:55, torpEnableDist:300, fireDelay:4.5,
-  torpWireMaxRange:3000, torpWireBreakTurnDeg:90,
+  torpArcDeg:55, torpEnableDist:16, fireDelay:4.5,   // ~160m enable distance
+  torpWireMaxRange:2780, torpWireBreakTurnDeg:90,    // ~15nm wire range
   wireMaxLaunchKts:15, wireSafeKts:15, wireStressKts:20,
   wireStressBreakTime:25, wireInstantBreakKts:22,
   periscope:     { cd:10.0, dur:4.5, revealR:3600, detectBoost:1.55, noiseSpike:0.10 },
@@ -194,4 +194,22 @@ export const VESSELS = [
     battery:{ drainPerKt:0.00014, chargeRate:0.003, surfaceChargeRate:0.005 },
     snorkelNoise:0.35, snorkelSpeedCap:5,
     sonar:{ ...sh.sonar, baffleHalfAngleDegBase:12, baffleHalfAngleDegPerKt:1.0 } },
+
+  // ── DEV TEST SUBMARINE ──────────────────────────────────────────────────
+  // Not a real vessel. Infinite depth, fast speed, no weapons. For testing
+  // bathymetry, grounding, ocean model, and world-scale navigation.
+  { ...sh, key:'dev_sub', name:'TEST VEHICLE', vesselClass:'DEV TEST PLATFORM', nation:'US', difficulty:'easy',
+    accelTau:10, decelTau:5, turnRateDeg:5.0, noPropulsionCasualties:true,
+    flavour:'Development test submarine. Infinite depth. No weapons.',
+    lore:['Test platform for development and debugging. Not a real submarine.'],
+    divingLimitM:99999, sonarSuite:'NONE', sonarQuality:0.50,
+    divingLimit:99999, safeDivingDepth:99999, designDepth:99999, maxDepth:99999, crushDepth:99999,
+    torpWeapon:'mk48_adcap', towedArray:'NONE',
+    r:20, hpMax:200, hitR:22, speedMaxKts:40, flankKts:60,
+    noiseFloor:0.010, flankNoiseBoost:0.20,
+    torpTubes:0, torpStock:0, magazineRack:0, torpReloadTime:99, cmStock:0,
+    vlsCells:0, vlsWeapon:null, missileStock:0, missileTypes:[],
+    cavitationKtsRef:99, speedDeafness:{ startKts:99, fullDeafKts:99 },
+    depthTau:2.0, depthRateMax:10.0, // very fast depth changes
+    hasTowedArray:false, masts:mastsUS },
 ];

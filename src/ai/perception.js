@@ -4,12 +4,31 @@ import { CONFIG } from '../config/constants.js';
 import { rand, clamp, now } from '../utils/math.js';
 import { world, player } from '../state/sim-state.js';
 import { session } from '../state/session-state.js';
+import { env, propagationPath, transmissionLoss } from '../systems/ocean-environment.js';
+import { seabedDepthAt } from '../systems/ocean.js';
 
 const C = CONFIG;
+const WU_PER_NM = 185.2;
 
-export function inLayer(d){return d>=world.layerY1&&d<=world.layerY2;}
-// 40% signal loss crossing thermocline — NATO exploited this heavily in Cold War doctrine
-export function layerPenalty(d1,d2){const a=inLayer(d1),b=inLayer(d2); return (a!==b)?0.60:1.0;}
+// Layer boundary is now driven by the ocean environment model's mixed layer depth.
+// "Above the layer" = depth < mixed layer depth. "Below the layer" = depth > mixed layer depth.
+// The thermocline transition zone is modelled as ±20m around the mixed layer depth.
+export function inLayer(d){
+  const layerDepth = env.propagation.layerDepth || env.svp.mixedLayerDepth || world.layerY1 || 180;
+  return d <= layerDepth + 20; // in or above the mixed layer (with 20m transition)
+}
+// Crossing the layer attenuates signal. Magnitude depends on layer strength
+// (combines gradient steepness, depth margin, and sea state).
+// Strong layer (summer, calm) → heavy penalty (~0.35). Weak layer (winter, rough) → mild (~0.85).
+export function layerPenalty(d1,d2){
+  const layerDepth = env.propagation.layerDepth || env.svp.mixedLayerDepth || world.layerY1 || 180;
+  const above1 = d1 <= layerDepth + 20;
+  const above2 = d2 <= layerDepth + 20;
+  if(above1 === above2) return 1.0;
+  // Penalty scales with layer strength (0=isothermal→0.95, 1=strong thermocline→0.35)
+  const strength = env.propagation.layerStrength ?? 0.5;
+  return clamp(1.0 - strength * 0.65, 0.35, 0.95);
+}
 export function wrapDx(x1,x2){return x2-x1;}
 export function wrapDy(y1,y2){return y2-y1;}
 
@@ -85,26 +104,122 @@ export function enemyRegisterBearing(e){
   // Update contact point — TMA position if quality good, else bearing-range estimate
   const prevContact=e.contact;
   if(e.tmaQuality>=0.20 && e.tmaX!=null){
-    e.contact={x:e.tmaX, y:e.tmaY, u:200*(1-e.tmaQuality), t:now(), strength:e.tmaQuality};
+    e.contact={x:e.tmaX, y:e.tmaY, u:200*(1-e.tmaQuality), t:now(), simT:T, strength:e.tmaQuality};
   } else {
     const estRange=dist+(rand(-1,1)*dist*0.25); // ±25% range noise
     e.contact={
       x:e.x+Math.cos(noisyBrg)*estRange,
       y:e.y+Math.sin(noisyBrg)*estRange,
-      u:400, t:now(), strength:0.15
+      u:400, t:now(), simT:T, strength:0.15
     };
   }
 }
 
 export function enemyHasFireSolution(e){
   if(!e.contact) return false;
-  const age=now()-e.contact.t;
-  if(age>C.enemy.fireMaxAge) return false;
-  // Require some minimal TMA quality — hasRoleSolution in sim.js is the real gate
-  if((e.tmaQuality||0)<0.20) return false;
-  if(e.suspicion<C.enemy.fireMinSus) return false;
-  if((e.playerBearings||[]).length<2) return false; // need at least a basic bearing history
+  // Contact state must be IDENTIFIED or TRACKING to fire
+  const cs = e.contactState || 'NONE';
+  if(cs !== 'IDENTIFIED' && cs !== 'TRACKING') return false;
+  // Contact age check (sim time)
+  const T = session.missionT || 0;
+  const age = T - (e.contact.simT ?? T);
+  if(age > C.enemy.fireMaxAge) return false;
+  // Require TMA quality
+  if((e.tmaQuality||0) < 0.20) return false;
+  if((e.playerBearings||[]).length < 3) return false;
   return true;
+}
+
+// ── Contact state evaluator ──────────────────────────────────────────────────
+// Replaces the suspicion-threshold state machine with contact classification.
+// Mirrors real submarine doctrine: detect → classify → identify → prosecute.
+// Uses ONLY the enemy's own sensor data.
+export function evaluateContactState(e){
+  const T = session.missionT || 0;
+  const cls = C.enemy.classification;
+  const obs = e.playerBearings || [];
+  const tmaQ = e.tmaQuality || 0;
+  const recentObs = obs.filter(b => T - b.t < 120);
+  const numObs = recentObs.length;
+  const lastObsT = recentObs.length ? recentObs[recentObs.length - 1].t : 0;
+  const staleSecs = numObs > 0 ? T - lastObsT : 9999;
+  const timeSinceFirst = e.firstDetectionT > 0 ? T - e.firstDetectionT : 0;
+  const prev = e.contactState || 'NONE';
+
+  // Role-based tracking threshold — aggressive roles track with less TMA quality
+  const roleTrackQ = e.role === 'zeta' ? cls.trackingTmaQ * 0.85
+    : e.role === 'ssbn' ? cls.trackingTmaQ * 1.6
+    : e.role === 'pinger' ? cls.trackingTmaQ * 1.2
+    : cls.trackingTmaQ;
+
+  let next = prev;
+
+  // ── Promotions (upward) ───────────────────────────────────────────────
+  if(prev === 'NONE' && numObs >= cls.detectionMinObs){
+    next = 'DETECTION';
+    if(!e.firstDetectionT) e.firstDetectionT = T;
+  }
+  if(prev === 'DETECTION'
+    && numObs >= cls.classifyMinObs
+    && timeSinceFirst >= cls.classifyMinTime
+    && tmaQ >= cls.classifyTmaQ){
+    next = 'CLASSIFIED';
+  }
+  if(prev === 'CLASSIFIED'
+    && numObs >= cls.identifyMinObs
+    && timeSinceFirst >= cls.identifyMinTime
+    && tmaQ >= cls.identifyTmaQ){
+    // GIUK Cold War: unidentified submerged contact = hostile
+    next = 'IDENTIFIED';
+  }
+  if(prev === 'IDENTIFIED' && tmaQ >= roleTrackQ){
+    next = 'TRACKING';
+  }
+
+  // ── Degradations (downward from quality loss) ─────────────────────────
+  if(prev === 'TRACKING' && tmaQ < cls.trackingDropTmaQ){
+    next = 'IDENTIFIED';
+  }
+  if(prev === 'IDENTIFIED' && tmaQ < cls.identifyDropTmaQ && staleSecs > 30){
+    next = 'CLASSIFIED';
+  }
+
+  // ── Staleness (downward from no observations) ─────────────────────────
+  // TRACKING can degrade to IDENTIFIED (lost solution quality)
+  if(prev === 'TRACKING' && staleSecs > cls.staleTrackingAge) next = 'IDENTIFIED';
+  // IDENTIFIED can degrade to CLASSIFIED (lost specific ID, still know it's submerged)
+  if(next === 'IDENTIFIED' && staleSecs > cls.staleIdentifiedAge) next = 'CLASSIFIED';
+  // CLASSIFIED NEVER degrades below CLASSIFIED from staleness alone.
+  // Once a crew has confirmed a submerged contact, they keep searching that sector.
+  // Only DETECTION (unconfirmed noise) can revert to NONE.
+  if(next === 'DETECTION'  && staleSecs > cls.staleDetectionAge){
+    next = 'NONE';
+    e.firstDetectionT = 0;
+  }
+  // Full contact loss — only applies to DETECTION (unconfirmed)
+  if(numObs === 0 && staleSecs > cls.contactLostAge && next === 'DETECTION'){
+    next = 'NONE';
+    e.firstDetectionT = 0;
+  }
+
+  // Record state change
+  if(next !== prev) e.contactStateT = T;
+  e.contactState = next;
+}
+
+// ── Contact state promotion helper ───────────────────────────────────────────
+// Used by external systems (torpedo detection, ping, datum share) to instantly
+// promote contact state to at least a given level.
+export function promoteContactState(e, minState){
+  const RANK = {NONE:0, DETECTION:1, CLASSIFIED:2, IDENTIFIED:3, TRACKING:4};
+  const T = session.missionT || 0;
+  const currentRank = RANK[e.contactState || 'NONE'] || 0;
+  const targetRank = RANK[minState] || 0;
+  if(targetRank > currentRank){
+    e.contactState = minState;
+    e.contactStateT = T;
+    if(!e.firstDetectionT) e.firstDetectionT = T;
+  }
 }
 
 // sensorPos: optional {x,y,depth} — the actual sensor location (buoy, helo dip).
@@ -122,6 +237,7 @@ export function enemyUpdateContactFromPing(e,px,py,dist,sensorPos){
     strength:clamp(0.50+(1-dist/2000)*0.40,0.30,0.92)
   };
   e.suspicion=Math.min(1,e.suspicion+0.45*e.contact.strength);
+  promoteContactState(e, 'CLASSIFIED'); // active ping return = confirmed contact
   // Bearing computed from SENSOR position, not ship — correct for buoys/helos
   if(!e.playerBearings) e.playerBearings=[];
   const brg=Math.atan2(py-sy, wrapDx(sx,px));
@@ -156,17 +272,50 @@ export function enemyMaybeHearPlayer(e,dt){
   const dx=wrapDx(e.x,player.wx);
   const dy=player.wy-e.y;
   const d=Math.hypot(dx,dy);
-  const baseRange=(e.type==='boat')?C.enemy.hearBoatRange:C.enemy.hearSubRange;
-  if(d>baseRange) return;
+  const rangeNm = d / WU_PER_NM;
 
+  // Max enemy hearing range — same propagation model as player
+  const p_env = env.propagation;
+  const maxHearNm = Math.max(
+    p_env.surfaceDuctRange,
+    p_env.directPathRange,
+    p_env.bottomBounceRange,
+    ...(p_env.czRanges.map(r => r + p_env.czWidth)),
+  ) + 5;
+  if(rangeNm > maxHearNm) return;
+
+  // Propagation path from player to enemy
   const sonarDepth=e.vdsDepth||e.depth||400;
-  const layer=layerPenalty(player.depth,sonarDepth);
-  let signal=player.noise*layer*(1-d/baseRange);
+  const waterDepth = seabedDepthAt((e.x+player.wx)/2, (e.y+player.wy)/2);
+  const path = propagationPath(player.depth, sonarDepth, rangeNm, waterDepth);
+  if(path === 'shadow' && rangeNm > p_env.directPathRange) return;
+
+  // Source level: player noise (same scale as sensor model)
+  const sourceLevel = 120 + player.noise * 30;
+
+  // Transmission loss
+  const TL = transmissionLoss(path, rangeNm, 'lf');
+  const ambientDB = 55 + env.ambient.total * 25;
+  // Enemy self-noise: machinery floor dominates below ~8kt, flow noise above
+  // Soviet boats: noisier machinery floor (~58dB) but same flow noise physics
+  const enemySpdKts = Math.hypot(e.vx||0,e.vy||0) / (185.2/3600);
+  const machineryFloor = e.type === 'boat' ? 55 : 58; // surface ships quieter (no reactor)
+  const flowNoise = enemySpdKts > 6 ? (enemySpdKts - 6) * 3.5 : 0; // flow only above 6kt
+  const ownShipNoise = machineryFloor + flowNoise;
+  const noiseLevel = 10 * Math.log10(Math.pow(10, ownShipNoise/10) + Math.pow(10, ambientDB/10));
+
+  // Enemy array gain: Soviet hull arrays ~20dB, surface ship hull ~18dB
+  const enemyArrayGain = e.type === 'boat' ? 18 : 20;
+  const snr = sourceLevel - TL - noiseLevel + enemyArrayGain;
+  if(snr < -16) return; // well below any threshold
+
+  // Normalise to 0-1 signal for probability calc
+  let signal = clamp((snr + 6) / 25, 0, 1);
+
   if(e.type==='boat' && (player.periscopeT||0)>0) signal*=(C.player.periscope?.detectBoost||1.55);
   if(signal<C.enemy.hearSignalMin) return;
 
   // ── Enemy deaf arc — player can hide in enemy baffles ─────────────────────
-  // Uses enemyBaffle* fields from C.player.sonar (Soviet boats: wider, speed-sensitive)
   const sg=C.player.sonar||{};
   const eBaffleBase =(sg.enemyBaffleBase??20)*Math.PI/180;
   const eBaffleMax  =(sg.enemyBaffleMax ??55)*Math.PI/180;
@@ -181,11 +330,11 @@ export function enemyMaybeHearPlayer(e,dt){
   if(signal<C.enemy.hearSignalMin) return;
 
   // Detection prob — deafness reduces it when enemy is sprinting; sensitivity scales hearing
-  // _dmgSensorMult: sonar casualty from torpedo damage (set in damageEnemy in sim.js)
   const sensorMult=e._dmgSensorMult??1.0;
-  const p=clamp((signal-C.enemy.hearPBase)*C.enemy.hearPScale*deafness*(e.sensitivity||1.0)*sensorMult, 0, 0.80);
+  const p=clamp((signal-C.enemy.hearPBase)*C.enemy.hearPScale*deafness*(e.sensitivity||1.0)*sensorMult, 0, 0.85);
   if(Math.random()<p){
-    const susGain=clamp(0.05+signal*0.22, 0.05, 0.18);
+    // Suspicion gain scales with signal strength — loud contacts build faster
+    const susGain=clamp(0.08+signal*0.35, 0.08, 0.30);
     e.suspicion=Math.min(1, e.suspicion+susGain);
     enemyRegisterBearing(e);
   }
@@ -204,7 +353,9 @@ export function enemyDecay(e,dt){
 
   e.suspicion=Math.max(0,e.suspicion-(C.enemy.susDecayBase+(quiet?C.enemy.susDecayQuietExtra:0))*dt);
   if(e.contact){
-    const age=now()-e.contact.t;
+    // Stamp sim time on first check if missing
+    if(e.contact.simT==null) e.contact.simT=T;
+    const age=T-e.contact.simT;
     if(age>C.enemy.contactMaxAge||(quiet&&age>C.enemy.contactMaxAgeQuiet)) e.contact=null;
   }
 }

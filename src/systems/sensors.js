@@ -3,6 +3,9 @@ import { CONFIG } from '../config/constants.js';
 import { rand, clamp, now } from '../utils/math.js';
 import { world, player, enemies, contacts, sonarContacts } from '../state/sim-state.js';
 import { session, addLog } from '../state/session-state.js';
+import { env, propagationPath, transmissionLoss, isBelowLayer } from '../systems/ocean-environment.js';
+import { seabedDepthAt } from '../systems/ocean.js';
+import { promoteContactState } from '../ai/perception.js';
 
 const C = CONFIG;
 
@@ -63,14 +66,14 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
         const cross=Math.min(d,Math.PI-d);
         if(cross>maxCross) maxCross=cross;
       }
-    const qCross=clamp((maxCross-5*Math.PI/180)/((25-5)*Math.PI/180),0,1);
+    // Crossing angle: with tight bearings, even small real bearing changes matter.
+    // 2° minimum (noise floor), 12° for full credit (a modest course change).
+    const qCross=clamp((maxCross-2*Math.PI/180)/((12-2)*Math.PI/180),0,1);
 
-    // Straight-leg floor: even without bearing divergence, a long baseline with many
-    // observations gives some Doppler/level information. Creeps up slowly so a
-    // patient player driving straight eventually gets DEGRADED but never SOLID.
-    // (SOLID still requires a real maneuver to get bearing crossing angle.)
-    const straightFloor=qBase*qObs*0.28;  // max ~0.28 on a pure straight leg
-    let q=Math.max(qBase*qObs*qCross, straightFloor*0.5);
+    // Straight-leg floor: patient tracking on a straight course gives some quality
+    // from Doppler/level analysis. Enough for DEGRADED but never SOLID.
+    const straightFloor=qBase*qObs*0.40;  // max ~0.40 on a pure straight leg
+    let q=Math.max(qBase*qObs*qCross, straightFloor);
 
     // Unresolved towed ambiguity with no recent hull coverage — cap at DEGRADED
     const hullAge=T-(c.lastHullBrgT||0);
@@ -100,19 +103,31 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
           if(cr>bestCross){ bestCross=cr; bestI=i; bestJ=j; }
         }
       const a=obs[bestI], b=obs[bestJ];
+      // Require meaningful baseline — triangulation needs real separation.
+      // At 5kt, 50wu baseline takes ~3 min to build. At 10nm range, this gives
+      // ~1.5° of parallax — minimum for a useful range estimate.
+      const obsBaseline=Math.hypot(b.fromX-a.fromX, b.fromY-a.fromY);
+
+      if(obsBaseline >= 50){
       // Intersect two rays: P = a.from + t*dir(a.brg), P = b.from + s*dir(b.brg)
       const ca=Math.cos(a.bearing), sa=Math.sin(a.bearing);
       const cb=Math.cos(b.bearing), sb=Math.sin(b.bearing);
       const det=ca*sb-sa*cb;
-      if(Math.abs(det)>0.01){
+      if(Math.abs(det)>0.02){
         const ddx=b.fromX-a.fromX, ddy=b.fromY-a.fromY;
         const t=(ddx*sb-ddy*cb)/det;
-        if(t>50){ // target must be ahead of observation point
+        if(t>5){
           const ix=a.fromX+ca*t, iy=a.fromY+sa*t;
           const rng=Math.hypot(_AI.wrapDx(player.wx,ix), iy-player.wy);
-          const clamped=clamp(rng, 200, 12000);
-          // Blend — faster than bearing-rate (0.7/0.3) since this is better geometry
-          c._estRange=c._estRange!=null ? c._estRange*0.6+clamped*0.4 : clamped;
+          const clamped=clamp(rng, 50, 20000);
+          // Simple blend — cross-bearing triangulation is geometrically sound,
+          // trust it. Better geometry (higher qCross) = faster blend.
+          if(c._estRange!=null){
+            const blendRate = clamp(bestCross * 2, 0.05, 0.40); // good crossing = blend faster
+            c._estRange = c._estRange * (1 - blendRate) + clamped * blendRate;
+          } else {
+            c._estRange = clamped;
+          }
           c._rangeSource='tma';
           c._rangeT=T;
           // ── Range rate — sampled every ~10s to compute CLSNG/OPNG tag ────────
@@ -152,6 +167,7 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
           c._tmaEstX=ix; c._tmaEstY=iy; c._tmaEstT=T;
         }
       }
+      } // end obsBaseline >= 3
     }
   }
 
@@ -223,30 +239,9 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
       // Corrected formula: R = ownSpd * |sin(θ)| / |brgRate|
       // where θ is the angle between own heading and the bearing to target.
       // Pure CBDR (θ=0) gives infinite range — clamped. Cross-track (θ=90°) is most accurate.
-      if(c._brgRate!=null && Math.abs(c._brgRate)>0.0005){
-        const ownSpd=Math.hypot(player.vx??0, player.speed ? Math.cos(player.heading)*player.speed : 0)
-                     || Math.abs(player.speed??0) || 0.5;
-        // Angle between own heading and bearing to contact
-        const latestB = c.latestBrg ?? 0;
-        const ownH = player.heading ?? 0;
-        const relAngle = latestB - ownH;
-        const sinTheta = Math.abs(Math.sin(relAngle));
-        // Only update when geometry is reasonable (sin > 0.2 = >12° off CBDR)
-        if(sinTheta > 0.20){
-          const rawR = (ownSpd * sinTheta) / Math.abs(c._brgRate);
-          const clamped = clamp(rawR, 200, 12000);
-          // Only use bearing-rate range if no better source is recent
-          const betterAge=(session.missionT||0)-(c._rangeT||0);
-          const hasBetter=c._rangeSource==='active'&&betterAge<10 || c._rangeSource==='tma'&&betterAge<20;
-          if(!hasBetter){
-            // Moderate smoothing — faster convergence than before (was 0.92/0.08)
-            c._estRange = c._estRange != null
-              ? c._estRange * 0.82 + clamped * 0.18
-              : clamped;
-            if(!c._rangeSource) c._rangeSource='brgrate';
-          }
-        }
-      }
+      // Bearing-rate range REMOVED — inherently unstable at realistic ranges.
+      // Range is now solely from cross-bearing triangulation (requires manoeuvre)
+      // and active ping (direct measurement). See the qCross block above.
 
       const prevQ=c.tmaQuality??0;
       const prevTier=prevQ<0.35?0:prevQ<0.70?1:2;
@@ -382,21 +377,28 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
       if(timeSinceObs>STALE_GRACE && c.tmaQuality>0){
         c.tmaQuality=Math.max(0,c.tmaQuality-DECAY_RATE*dt);
       }
-      // Estimated depth — noisy, gated by TMA quality. Updates every ~5s.
-      // Smoothed exponentially so the readout drifts rather than jumping.
+      // Estimated depth — noisy initial estimate, converges over time.
+      // Real passive depth estimation: rough at first, stabilises with sustained tracking.
       c._depthTickT=(c._depthTickT||0)-dt;
       if(c._depthTickT<=0){
-        c._depthTickT=rand(4.0,6.0);
+        c._depthTickT=rand(6.0,10.0);
         const trueDepth=e.depth??200;
         if(c.tmaQuality>=(TMA.qualityThresholdSolid||0.70)){
-          const noise=(Math.random()-0.5)*160;
-          const raw=Math.round((trueDepth+noise)/25)*25;
-          c._estDepth=c._estDepth!=null?Math.round(c._estDepth*0.7+raw*0.3):raw;
+          // SOLID: small noise, heavy smoothing — estimate stabilises
+          const noise=(Math.random()-0.5)*40; // ±20m
+          const raw=Math.round((trueDepth+noise)/10)*10; // round to 10m
+          c._estDepth=c._estDepth!=null
+            ? Math.round(c._estDepth*0.92+raw*0.08) // slow drift, stable readout
+            : Math.round((trueDepth+(Math.random()-0.5)*80)/25)*25; // initial: ±40m
         } else if(c.tmaQuality>=(TMA.qualityThresholdRange||0.35)){
-          const noise=(Math.random()-0.5)*400;
-          const raw=Math.round((trueDepth+noise)/50)*50;
-          c._estDepth=c._estDepth!=null?Math.round(c._estDepth*0.6+raw*0.4):raw;
+          // DEGRADED: rougher, slower convergence
+          const noise=(Math.random()-0.5)*120; // ±60m
+          const raw=Math.round((trueDepth+noise)/25)*25;
+          c._estDepth=c._estDepth!=null
+            ? Math.round(c._estDepth*0.90+raw*0.10)
+            : Math.round((trueDepth+(Math.random()-0.5)*160)/50)*50; // initial: ±80m
         } else {
+          // Below DEGRADED: no depth estimate
           c._estDepth=null;
         }
       }
@@ -515,9 +517,9 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
     }
     if(ta.state === 'destroyed') return;
 
-    // Towed array characteristics
+    // Towed array characteristics — longer range, lower self-noise than hull
     const operational = ta.state === 'operational';
-    const baseRange   = operational ? 4500 : 3000;
+    const towedSensBonus = operational ? 6 : 0; // dB advantage over hull array
     const selfMaskMul = operational ? 0.20 : 0.40;
     const noiseUMul   = operational ? 0.7  : 1.4;
     const tickRate    = operational ? [0.8,1.4] : [1.2,2.0];
@@ -527,50 +529,79 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
     player.towedTick = rand(tickRate[0], tickRate[1]);
 
     const heading = player.heading || 0;
+    const p_env = env.propagation;
+    const ambientNoise = env.ambient.total;
+
+    // Max towed range — towed arrays hear further than hull (VLF sensitivity)
+    const maxTowedNm = Math.max(
+      p_env.surfaceDuctRange * 1.3,
+      p_env.directPathRange * 1.3,
+      p_env.bottomBounceRange,
+      ...(p_env.czRanges.map(r => r + p_env.czWidth)),
+    ) + 10;
+    const maxTowedWU = maxTowedNm * WU_PER_NM;
 
     for(const e of enemies){
       if(e.dead) continue;
       const dx = _AI.wrapDx(player.wx, e.x);
       const dy = e.y - player.wy;
       const d  = Math.hypot(dx, dy);
-      const CZt=C.detection.cz||{};
-      const czMinT=CZt.min??4800, czMaxT=CZt.max??5500, czBoostT=CZt.boost??3.2;
-      const layer  = _AI.layerPenalty(player.depth, e.depth||0);
-      const inCZt  = layer>=1.0 && d>=czMinT && d<=czMaxT;
-      if(d > baseRange && !inCZt) continue;
+      if(d > maxTowedWU) continue;
 
       const trueBrg = Math.atan2(dy, dx);
 
       // Cone of silence — no returns within ±28° of stern
       if(inDeadCone(trueBrg, heading)) continue;
 
-      let signal;
-      if(inCZt && d>baseRange){
-        const czCenterT=(czMinT+czMaxT)/2;
-        const czHalfT=(czMaxT-czMinT)/2;
-        const czEnvT=1-Math.abs(d-czCenterT)/czHalfT;
-        signal=e.noise*layer*czBoostT*czEnvT;
-      } else {
-        signal = e.noise * layer * (1 - d/baseRange);
-      }
-      if(e.type==='boat') signal *= 1.25;
-      const selfMask = player.noise * selfMaskMul;
-      const detect = signal - selfMask;
-      if(detect <= 0) continue;
+      const rangeNm = d / WU_PER_NM;
+      const srcDepth = e.depth || 200;
+      const rcvDepth = player.depth;
+      const midX = (player.wx + e.x) / 2;
+      const midY = (player.wy + e.y) / 2;
+      const waterDepth = seabedDepthAt(midX, midY);
+      const path = propagationPath(srcDepth, rcvDepth, rangeNm, waterDepth);
+
+      if(path === 'shadow' && rangeNm > p_env.directPathRange) continue;
+
+      // Source level — same scale as hull passive
+      const sourceLevelBase = e.type === 'boat' ? 155 : 120;
+      const sourceLevel = sourceLevelBase + (e.noise || 0.3) * 30;
+
+      // Towed array hears VLF better — use VLF absorption for long range
+      const freqBand = rangeNm > 15 ? 'vlf' : 'lf';
+      const TL = transmissionLoss(path, rangeNm, freqBand);
+
+      // Towed array self-noise is much lower (towed away from hull)
+      const ownShipNoise = 55 + player.noise * 40 * selfMaskMul;
+      const ambientDB = 55 + ambientNoise * 25;
+      const noiseLevel = 10 * Math.log10(Math.pow(10, ownShipNoise/10) + Math.pow(10, ambientDB/10));
+
+      // Towed array gain: ~30dB (longer aperture than hull array)
+      const arrayGain = 30;
+      const snr = sourceLevel - TL - noiseLevel + arrayGain + towedSensBonus;
+      const detectThreshold = -6;
+      if(snr < detectThreshold - 10) continue;
+
+      const signal01 = clamp((snr - detectThreshold) / 20, 0, 1);
+      if(signal01 <= 0) continue;
 
       const fatigueT=session.watchFatigue||0;
       const fatiguePenT=1-fatigueT*0.40;
-      const p = clamp((0.06 + detect*0.60 + (e.type==='boat'?0.12:0.06))*fatiguePenT, 0, 0.80);
+      const isCZ = path.startsWith('cz');
+      const p = clamp((0.06 + signal01*0.60 + (e.type==='boat'?0.12:0.06))*fatiguePenT, 0, 0.80);
       if(Math.random() < p){
-        const layerMult = (layer<1) ? 1.4 : 1.0;
-        const baseU = (60 + d*0.08) * noiseUMul;
-        const noiseU = baseU * layerMult * (1 + player.noise*0.4) * (1+fatigueT*0.60);
-        const u_brg = clamp(noiseU/Math.max(d,100), 0.01, 0.18);
+        const layer=_AI.layerPenalty(player.depth,srcDepth);
+        // Towed array bearing noise — SNR-based, same approach as hull
+        // Towed arrays have better bearing accuracy than hull (longer aperture)
+        const snrNoiseTow = clamp(1.0 - signal01, 0.1, 1.0);
+        const baseNoiseDegTow = 0.5 + snrNoiseTow * 5.0; // 0.5° to 5.5° (tighter than hull)
+        const layerMult = (layer<1) ? 1.3 : 1.0;
+        const noiseDegTow = baseNoiseDegTow * layerMult * noiseUMul
+          * (1 + fatigueT*0.25);
+        const u_brg = clamp(noiseDegTow * Math.PI/180, 0.003, 0.10);
         const noisyBrg = trueBrg + rand(-1,1)*u_brg;
         const mirrorBrg = mirrorBearing(noisyBrg, heading);
 
-        // Ephemeral flashes — push BOTH bearings so neither side looks stronger
-        // Only suppress mirror flash if already resolved (then only true side shows)
         const sc=sonarContacts?.get(e);
         const alreadyResolved=sc?.towedResolved!=null;
         contacts.push({fromX:player.wx, fromY:player.wy, bearing:noisyBrg, u_brg, life:2.5, kind:e.type, source:'towed'});
@@ -580,10 +611,9 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
 
         registerTowedBearing(e, noisyBrg, mirrorBrg, u_brg);
         setDetected(e, C.detection.detectT, 0);
-        // Sonar raw feed
         const brgDegT=((noisyBrg*180/Math.PI)+360)%360;
-        const sigTierT=detect>0.35?2:detect>0.15?1:0;
-        addSonarLog(e,'TOWED',brgDegT,sigTierT,inCZt&&d>baseRange);
+        const sigTierT=signal01>0.6?2:signal01>0.25?1:0;
+        addSonarLog(e,'TOWED',brgDegT,sigTierT,isCZ);
       }
     }
   }
@@ -606,6 +636,7 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
       if(d>range) continue;
       const sig=clamp(1-d/range, 0.15, 1.0);
       e.suspicion=Math.min(1, e.suspicion + susGain*sig);
+      promoteContactState(e, 'DETECTION'); // transient heard = at least a detection
       // Give enemy a bearing + rough position toward source
       const brg=Math.atan2(dy,dx)+rand(-1,1)*0.08;
       if(!e.playerBearings) e.playerBearings=[];
@@ -627,7 +658,8 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
   function playerHearTransient(e, srcX, srcY){
     const dx=_AI.wrapDx(player.wx, srcX), dy=srcY-player.wy;
     const d=Math.hypot(dx,dy);
-    const range=C.enemy.fireTransientRange||1800;
+    // Fire transient range: ~20nm (torpedo launch is loud)
+    const range = 20 * WU_PER_NM;
     if(d>range) return;
     const brg=Math.atan2(dy,dx);
     const brgDeg=(((Math.atan2(Math.cos(brg),-Math.sin(brg))*180/Math.PI)+360)%360);
@@ -642,6 +674,9 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
     _COMMS?.sensors.launchTransient(Math.round(brgDeg).toString().padStart(3,'0')+'°');
   }
 
+  // ── World units ↔ nautical miles ───────────────────────────────────────────
+  const WU_PER_NM = 185.2;
+
   function passiveUpdate(dt){
     tickContacts(dt);
     player.passiveTick=(player.passiveTick||0)-dt;
@@ -652,34 +687,69 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
     const quietBonus=1.4-player.noise*1.0;
     player.passiveTick=rand(0.7,1.3)/(Math.max(0.20,quietBonus)*Math.max(0.15,deafness));
 
+    const p_env = env.propagation;
+    const ambientNoise = env.ambient.total;
+    // Maximum hull passive range in world units — beyond this, skip early
+    const maxPassiveNm = Math.max(
+      p_env.surfaceDuctRange,
+      p_env.directPathRange,
+      p_env.bottomBounceRange,
+      ...(p_env.czRanges.map(r => r + p_env.czWidth)),
+    ) + 5; // +5nm margin
+    const maxPassiveWU = maxPassiveNm * WU_PER_NM;
+
     for(const e of enemies){
       if(e.dead) continue;
       const dx=_AI.wrapDx(player.wx,e.x);
       const dy=_AI.wrapDy(player.wy,e.y);
       const d=Math.hypot(dx,dy);
+      if(d > maxPassiveWU) continue;
+
       const dmgFx=_DMG?.getEffects()||{};
-      const baseRange=2800*(dmgFx.sonarRangeMult??1.0);
-      const CZ=C.detection.cz||{};
-      const czMin=CZ.min??4800, czMax=CZ.max??5500, czBoost=CZ.boost??3.2;
-      const layer=_AI.layerPenalty(player.depth,e.depth||0);
-      // CZ only when both platforms are below the thermal layer (layer penalty not active)
-      const inCZ=layer>=1.0 && d>=czMin && d<=czMax;
-      if(baseRange<=0||(d>baseRange&&!inCZ)) continue;
-      let signal;
-      if(inCZ && d>baseRange){
-        // Convergence zone — triangular envelope peaks at band centre
-        const czCenter=(czMin+czMax)/2;
-        const czHalf=(czMax-czMin)/2;
-        const czEnv=1-Math.abs(d-czCenter)/czHalf;
-        signal=e.noise*layer*czBoost*czEnv;
-      } else {
-        signal=e.noise*layer*(1-d/Math.max(baseRange,1));
-      }
-      if(e.type==='boat') signal*=1.25;
-      const selfMask=player.noise*0.55;
+      const rangeNm = d / WU_PER_NM;
+
+      // Determine propagation path and transmission loss
+      const srcDepth = e.depth || 200;
+      const rcvDepth = player.depth;
+      const midX = (player.wx + e.x) / 2;
+      const midY = (player.wy + e.y) / 2;
+      const waterDepth = seabedDepthAt(midX, midY);
+      const path = propagationPath(srcDepth, rcvDepth, rangeNm, waterDepth);
+
+      // Shadow zone — very low detection probability
+      if(path === 'shadow' && rangeNm > p_env.directPathRange) continue;
+
+      // Source level: enemy noise (0-1 scale) → dB re 1μPa
+      // Quiet SSN at creep ≈ 120dB, noisy at flank ≈ 150dB
+      // Surface ship ≈ 150-170dB
+      const sourceLevelBase = e.type === 'boat' ? 155 : 120;
+      const sourceLevel = sourceLevelBase + (e.noise || 0.3) * 30;
+
+      // Transmission loss from propagation model
+      const TL = transmissionLoss(path, rangeNm, 'lf');
+
+      // Receiver noise: own-ship self-noise + ambient ocean noise
+      // Quiet sub at 5kt ≈ 65dB, full speed ≈ 95dB
+      const ownShipNoise = 55 + player.noise * 40;
+      const ambientDB = 55 + ambientNoise * 25;    // calm ≈ 55dB, SS6 ≈ 70dB
+      const noiseLevel = 10 * Math.log10(Math.pow(10, ownShipNoise/10) + Math.pow(10, ambientDB/10));
+
+      // Array gain: hull-mounted spherical array provides ~25dB processing gain
+      const arrayGain = 25;
+
+      // Signal-to-noise ratio (sonar equation: SNR = SL - TL - NL + AG)
+      const snr = sourceLevel - TL - noiseLevel + arrayGain;
+
+      // Sonar equipment sensitivity
+      const sonarDamageMult = dmgFx.sonarRangeMult ?? 1.0;
+      const squal = C.player.sonarQuality ?? 0.85;
+      const effectiveSNR = snr + 10 * Math.log10(squal * sonarDamageMult);
+
+      // Detection threshold: ~-6dB for initial detection
+      const detectThreshold = -6;
+      if(effectiveSNR < detectThreshold - 10) continue; // well below threshold, skip
 
       // ── Bow array deaf arc — hull sonar cannot hear into own stern null ──────
-      // relAngle: 0 = dead ahead, π = dead astern
       const trueBearing=Math.atan2(dy,dx);
       const sg=C.player.sonar||{};
       const baffleBase=(sg.baffleHalfAngleDegBase??15)*Math.PI/180;
@@ -687,32 +757,43 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
       const baffleHalf=clamp(baffleBase+(player.speed||0)*(sg.baffleHalfAngleDegPerKt??1.5)*Math.PI/180, baffleBase, baffleMax);
       const rolloff   =(sg.baffleRolloffDeg??20)*Math.PI/180;
       const relAngle  =Math.abs(((trueBearing-(player.heading||0)+3*Math.PI)%(Math.PI*2))-Math.PI);
-      const deadStart =Math.PI-baffleHalf;   // beyond this: fade out
-      const fullLimit =deadStart-rolloff;    // before this: full sensitivity
+      const deadStart =Math.PI-baffleHalf;
+      const fullLimit =deadStart-rolloff;
       const geoMult   =relAngle<=fullLimit?1.0:relAngle>=deadStart?0.0:1.0-(relAngle-fullLimit)/rolloff;
-      // sonarQuality: vessel-specific sensitivity — was defined per preset but never read
-      const squal=C.player.sonarQuality??0.85;
 
-      const detect=(signal-selfMask)*deafness*geoMult*squal;
-      if(detect<=0) continue;
+      // Final detection signal — apply directional and deafness penalties in dB
+      const geoDB = geoMult > 0.01 ? 10 * Math.log10(geoMult) : -40; // 0dB at broadside, -40dB in baffles
+      const deafDB = deafness > 0.01 ? 10 * Math.log10(deafness) : -20;
+      const finalSNR = effectiveSNR + geoDB + deafDB;
+      const signal01 = clamp((finalSNR - detectThreshold) / 20, 0, 1);
+
+      if(signal01 <= 0) continue;
+
       // Watch fatigue — tired operators miss contacts and bearings drift
       const fatigue=session.watchFatigue||0;
-      const fatiguePenalty=1-fatigue*0.40;  // up to 40% detection loss at full fatigue
-      const p=clamp((0.05+detect*0.55+(e.type==='boat'?0.10:0.05))*fatiguePenalty, 0, 0.75);
+      const fatiguePenalty=1-fatigue*0.40;
+      const isCZ = path.startsWith('cz');
+      const p=clamp((0.05+signal01*0.55+(e.type==='boat'?0.10:0.05))*fatiguePenalty, 0, 0.75);
       if(Math.random()<p){
-        // trueBearing already computed above for deaf arc geometry
-        const layerMult=(layer<1)?1.50:1.0;
-        const baseU=80+d*0.10;
-        const noiseU=baseU*layerMult*(dmgFx.bearingNoiseMult??1.0)*(1+player.noise*0.8)*(1+(1-deafness)*0.6)*(1+fatigue*0.60);
-        const u_brg=clamp(noiseU/Math.max(d,100),0.02,0.30);
+        const layer=_AI.layerPenalty(player.depth,srcDepth);
+        // Bearing noise driven by signal quality (SNR-based)
+        // Strong signal → tight bearing (±1°), faint → loose (±8°)
+        // Real hull array: ±1-3° at good SNR, ±5-8° at detection threshold
+        const snrNoise = clamp(1.0 - signal01, 0.1, 1.0); // 0.1 at perfect, 1.0 at threshold
+        const baseNoiseDeg = 1.0 + snrNoise * 7.0; // 1° to 8° based on SNR
+        const layerMult=(layer<1)?1.4:1.0; // crossing layer degrades bearing
+        const noiseDeg = baseNoiseDeg * layerMult
+          * (dmgFx.bearingNoiseMult??1.0)
+          * (1 + fatigue*0.3); // fatigue adds up to 30% more noise
+        const u_brg=clamp(noiseDeg * Math.PI/180, 0.005, 0.15); // convert to radians, cap at ±8.5°
         const noisyBearing=trueBearing+rand(-1,1)*u_brg;
         contacts.push({fromX:player.wx,fromY:player.wy,bearing:noisyBearing,u_brg,life:2.5,kind:e.type});
         registerBearing(e,noisyBearing,u_brg,'hull');
         setDetected(e,C.detection.detectT,0);
         // Sonar raw feed
         const brgDeg=((noisyBearing*180/Math.PI)+360)%360;
-        const sigTier=detect>0.35?2:detect>0.15?1:0;
-        addSonarLog(e,'HULL',brgDeg,sigTier,inCZ&&d>baseRange);
+        const sigTier=signal01>0.6?2:signal01>0.25?1:0;
+        addSonarLog(e,'HULL',brgDeg,sigTier,isCZ);
       }
     }
   }
@@ -737,14 +818,39 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
     // Ping is a loud transient — big noise spike
     player.noiseTransient=Math.min(1,player.noiseTransient+0.65);
 
-    // Detect enemies (returns echo to player)
+    // Active sonar: source level ~220dB, MF band (10-50kHz).
+    // Two-way propagation: ping out + echo back = 2× transmission loss.
+    // Detection range: typically 10-20nm in good conditions.
+    const activeSourceLevel = 220; // dB re 1μPa
+    const activeThreshold = 80;    // dB — minimum return echo strength
+    const p_env = env.propagation;
+    // Active range limited by 2-way TL. Approximate max: ~20nm in good conditions.
+    const maxActiveNm = 25;
+    const maxActiveWU = maxActiveNm * WU_PER_NM;
+
     let hits=0;
     for(const e of enemies){
       if(e.dead) continue;
       const dx=_AI.wrapDx(player.wx,e.x);
       const dy=_AI.wrapDy(player.wy,e.y);
       const d=Math.hypot(dx,dy);
-      if(d<C.detection.pingDetectR){
+      if(d > maxActiveWU) continue;
+
+      const rangeNm = d / WU_PER_NM;
+      const srcDepth = player.depth;
+      const tgtDepth = e.depth || 200;
+      const waterDepth = seabedDepthAt((player.wx+e.x)/2, (player.wy+e.y)/2);
+      const path = propagationPath(srcDepth, tgtDepth, rangeNm, waterDepth);
+
+      // Two-way TL: ping goes out and echo comes back (MF band)
+      const oneWayTL = transmissionLoss(path, rangeNm, 'mf');
+      const twoWayTL = oneWayTL * 2;
+
+      // Target strength: submarines ~15dB, surface ships ~20dB
+      const targetStrength = e.type === 'boat' ? 20 : 15;
+
+      const echoLevel = activeSourceLevel - twoWayTL + targetStrength;
+      if(echoLevel >= activeThreshold){
         setDetected(e,C.detection.detectT,0);
         registerFix(e,e.x,e.y,20+d*0.04,'active');
         hits++;
@@ -753,16 +859,17 @@ export function _bindSensors(deps) { if(deps.COMMS) _COMMS=deps.COMMS; if(deps.A
     _COMMS?.sensors.activePing(hits);
 
     // DATUM — ping is heard by ALL enemies in a very wide radius
-    // This is the primary cost of going active
-    const datumRange=C.player.pingDatumRange||5000;
+    // Active ping travels one-way at full source level — heard much further than echo returns
+    // Datum range: ~40nm (one-way propagation at 220dB source level)
+    const datumRangeNm = 40;
+    const datumRangeWU = datumRangeNm * WU_PER_NM;
     const datumSus=C.player.pingDatumSus||0.75;
-    broadcastTransient(player.wx, player.wy, datumRange, datumSus, null);
-    // Count how many were alerted
+    broadcastTransient(player.wx, player.wy, datumRangeWU, datumSus, null);
     let alerted=0;
     for(const e of enemies){
       if(!e.dead){
         const dx=_AI.wrapDx(player.wx,e.x), dy=player.wy-e.y;
-        if(Math.hypot(dx,dy)<datumRange) alerted++;
+        if(Math.hypot(dx,dy)<datumRangeWU) alerted++;
       }
     }
     _COMMS?.sensors.pingDatum(alerted);

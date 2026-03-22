@@ -67,7 +67,9 @@ function deployDecoy(x,y,friendly=true,kind="noisemaker",opts={}){
 // launchOffset = angle between aimed bearing and sub heading (radians, 0..PI)
 // Returns true if wire snapped at launch
 function fireTorpedo(fromX,fromY,dirX,dirY,friendly=true,enableDist=C.player.torpEnableDist,wireGuided=false,launchOffset=0,fromDepth=200,depthOrder=null,statOverrides=null){
-  const sp=(statOverrides?.speed??C.torpedo.speed);
+  const KTS_TO_WU = 185.2 / 3600;
+  const spKts=(statOverrides?.speed??C.torpedo.speed);
+  const sp = spKts * KTS_TO_WU; // convert knots to world units/s for initial velocity
   const d=Math.max(1e-6,Math.hypot(dirX,dirY));
   const launchAng=Math.atan2(dirY,dirX);
 
@@ -169,17 +171,32 @@ function wireUpdate(b, dt){
       const tmaQ=sc?.tmaQuality??0;
       const TMA=C.tma;
 
+      // Update torpedo depth order from TDC depth estimate (wire-guided depth steering)
+      // Smoothed — don't chase noisy depth estimates frame-by-frame
+      if(sc?._estDepth!=null){
+        const targetDepth = sc._estDepth;
+        if(b._wireDepthTarget == null) b._wireDepthTarget = targetDepth;
+        // Blend slowly — 5% per update toward new estimate
+        b._wireDepthTarget = b._wireDepthTarget * 0.95 + targetDepth * 0.05;
+        // Only change depth order if estimate has shifted significantly (>20m)
+        if(Math.abs(b._wireDepthTarget - b.depthOrder) > 20){
+          b.depthOrder = Math.round(b._wireDepthTarget);
+        }
+      }
+
       let beamBrg = latestBrg;
 
-      // Lead angle at SOLID quality
+      // Lead angle at SOLID quality — clamped to prevent wild corrections
       if(tmaQ>=(TMA?.qualityThresholdSolid??0.70) && sc?._brgRate!=null){
         let pdx=b.x-player.wx;
         let pdy=b.y-player.wy;
         const torpDist=Math.hypot(pdx,pdy);
-        const estRange=Math.max(500, sc?._estRange??3000);
-        const remaining=Math.max(200, estRange-torpDist);
-        const estTof=remaining/(C.torpedo.speed??50);
-        beamBrg += sc._brgRate * estTof * 0.5;
+        const estRange=Math.max(50, sc?._estRange??500);
+        const remaining=Math.max(20, estRange-torpDist);
+        const torpSpdWU=(C.torpedo.speed??55)*(185.2/3600);
+        const estTof=clamp(remaining/torpSpdWU, 0, 300); // cap TOF at 5 min
+        const leadAngle=clamp(sc._brgRate * estTof * 0.5, -0.15, 0.15); // cap lead to ±8.5°
+        beamBrg += leadAngle;
       }
 
       let pdx=b.x-player.wx;
@@ -188,8 +205,9 @@ function wireUpdate(b, dt){
       const crossTrack = pdx * Math.sin(beamBrg) - pdy * Math.cos(beamBrg);
       const alongTrack = pdx * Math.cos(beamBrg) + pdy * Math.sin(beamBrg);
 
-      const maxCorr = 15 * Math.PI / 180;
-      const corrGain = Math.max(alongTrack, 300);
+      // Cross-track correction — gentle, proportional steering back onto beam
+      const maxCorr = 10 * Math.PI / 180; // ±10° max correction
+      const corrGain = Math.max(alongTrack, 30); // scaled for new world units
       const correction = clamp(-crossTrack / corrGain, -1, 1) * maxCorr;
 
       let rawTargetBrg = beamBrg + correction;

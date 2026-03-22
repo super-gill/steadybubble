@@ -4,6 +4,7 @@ import { CONFIG } from '../config/constants.js';
 import { clamp, lerp, deg2rad, angleNorm } from '../utils/math.js';
 import { world, player, enemies, bullets, sonarContacts, cam, tdc } from '../state/sim-state.js';
 import { session, setMsg, addLog, setCasualtyState, setTacticalState } from '../state/session-state.js';
+import { seabedDepthAt } from './ocean.js';
 
 const C = CONFIG;
 
@@ -27,7 +28,9 @@ export function _bindNav(deps) {
   if(deps.canvas) _canvas=deps.canvas;
 }
 
-function ktsToWU(k){ return k*1; }
+// 1 knot = 1 nm/hour = 185.2 wu / 3600s = 0.05144 wu/s
+const KTS_TO_WU = 185.2 / 3600;
+function ktsToWU(k){ return k * KTS_TO_WU; }
 
 // Route: ordered array of {wx,wy} waypoints
 export const route=[];
@@ -36,7 +39,7 @@ function updateOrders(dt){
   // ── Zoom ──────────────────────────────────────────────────────────────────
   if(_I.zoomDelta!==0){
     const factor=Math.pow(1.18,_I.zoomDelta);
-    C.camera.zoom=clamp(C.camera.zoom*factor,0.04,8.00);
+    C.camera.zoom=clamp(C.camera.zoom*factor,0.008,8.00);
     _I.zoomDelta=0;
   }
 
@@ -640,7 +643,14 @@ function stepDynamics(dt){
 
   // Net velocity — no hardcoded sink rate; flooding works through buoyancy
   const netVy = buoyancyVy + planeContrib + (player._blowVy||0);
-  player.depth = clamp(player.depth + netVy*dt, 0, world.ground-40);
+  // Clamp depth to local seabed (from bathymetry) minus hull clearance.
+  // If seabed is shallower than the sub's current depth, clamp to seabed
+  // but never force to surface (that's grounding, handled by ocean.js).
+  const _localSeabed = seabedDepthAt(player.wx, player.wy);
+  const _draft = C.player.isDiesel ? 8 : 12;
+  const _depthFloor = Math.max(_draft, _localSeabed - _draft);
+  const newDepth = player.depth + netVy * dt;
+  player.depth = clamp(newDepth, 0, _depthFloor);
 
   // ── Trim warnings (rate-limited) ─────────────────────────────────────────
   if(_COMMS && floodBuoy > 0){

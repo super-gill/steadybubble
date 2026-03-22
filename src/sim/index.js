@@ -17,6 +17,11 @@ import { bindPlayerPhysics, tickReactorScram, tickCrashDive, tickCoolantLeak,
 import { bindCasualtyTicks,
          tickHydraulic, tickShaftSeal, tickHotRun, tickStuckPlanes,
          tickSnorkelFlood, tickHydrogen, tickChlorine } from './casualty-ticks.js';
+import * as _OCEAN_MOD from '../systems/ocean.js';
+import { setOceanLocation, setOceanComms, tickOcean, setGroundingDamageFn } from '../systems/ocean.js';
+const _OCEAN = _OCEAN_MOD;
+import { getLocation } from '../config/locations/index.js';
+import { initEnvironment, tickEnvironment, env as oceanEnv } from '../systems/ocean-environment.js';
 import { bindScenario, spawnScenario, spawnWave,
          tickWaveManagement, tickVictory } from './scenario.js';
 
@@ -49,7 +54,27 @@ export function _bindSim(deps) {
   if (deps.SENSE) _SENSE = deps.SENSE;
   if (deps.W) _W = deps.W;
   if (deps.AI) _AI = deps.AI;
-  if (deps.DMG) _DMG = deps.DMG;
+  if (deps.DMG) {
+    _DMG = deps.DMG;
+    // Wire grounding damage — ocean.js calls this on terrain collision
+    setGroundingDamageFn((severity, speed) => {
+      if (!_DMG?.hit) return;
+      const dmgAmount = severity === 'severe' ? 65 : severity === 'hard' ? 35 : 15;
+      _DMG.hit(dmgAmount, null, null, _DMG.COMPS[0]); // damage forward compartment
+      if (severity === 'severe') {
+        // Sonar dome destroyed on severe grounding
+        if (player.damage?.systems?.sonar_hull != null) {
+          player.damage.systems.sonar_hull = 'destroyed';
+          player.damage.permanentDamage?.add('sonar_hull');
+        }
+      }
+      // Acoustic transient — everyone hears the impact
+      if (_broadcastTransient) {
+        const transientRange = severity === 'severe' ? 8000 : severity === 'hard' ? 4000 : 1500;
+        _broadcastTransient(player.wx, player.wy, transientRange, 0.6, null);
+      }
+    });
+  }
   if (deps.TORP) _TORP = deps.TORP;
   if (deps.MSL) _MSL = deps.MSL;
   if (deps.PANEL) _PANEL = deps.PANEL;
@@ -234,6 +259,7 @@ function tickRadarSweep(dt){
     _SENSE.registerFix(e,e.x+rand(-15,15),e.y+rand(-15,15),5,'radar');
     // Enemy detects our emission -- bearing fix + suspicion boost
     e.suspicion=Math.min(1,Math.max(e.suspicion,C.enemy.asw?.huntSuspicionFloor||0.70));
+    _AI.promoteContactState(e, 'CLASSIFIED'); // radar emission = confirmed contact
     const brgFromE=Math.atan2(player.wy-e.y,player.wx-e.x);
     if(!e.playerBearings) e.playerBearings=[];
     const T=session.missionT||0;
@@ -257,7 +283,12 @@ function reset(){
   setCasualtyState('normal'); setTacticalState('cruising');
   session._ssbnVictory=false;session._bossVictory=false;session._aswVictory=false;session._enemiesKilled=0;
   player.pendingFires=[];
-  const spawn=_MAPS?.getMap()?.playerSpawn||{wx:4000,wy:5000};
+  // Player spawn: scenario position > map position > world centre
+  const defaultSpawn = {
+    wx: session._playerSpawnX ?? world.w * 0.5,
+    wy: session._playerSpawnY ?? world.h * 0.5,
+  };
+  const spawn=_MAPS?.getMap()?.playerSpawn||defaultSpawn;
   player.wx=spawn.wx; player.wy=spawn.wy;
   player.heading=0; player.speed=0; player.speedOrderKts=0;
   const spawnDepth=Math.min(260, C.player.safeDivingDepth||C.player.divingLimit||260);
@@ -335,19 +366,65 @@ function reset(){
 }
 // reset() called by main.js after all bindings are wired
 
+// ── Scenario definitions ──────────────────────────────────────────────
+// Each scenario specifies season, weather override, player spawn position,
+// and passes its ID to spawnScenario for enemy setup.
+const SCENARIO_DEFS = {
+  duel:          { season:'summer', spawnX:0.3, spawnY:0.5 },
+  waves:         { season:'autumn', spawnX:0.5, spawnY:0.5 },
+  patrol:        { season:'winter', spawnX:0.5, spawnY:0.8 },
+  ssbn_hunt:     { season:'spring', spawnX:0.2, spawnY:0.5 },
+  ambush:        { season:'winter', spawnX:0.5, spawnY:0.5 },
+  boss_fight:    { season:'summer', spawnX:0.3, spawnY:0.4 },
+  asw_taskforce: { season:'autumn', spawnX:0.5, spawnY:0.5 },
+  free_run:      { season:'summer', spawnX:0.5, spawnY:0.5 },
+};
+
 function resetScenario(scenario){
-  session.scenario=scenario;
+  // scenario can be a string ID or an object {id, season, ...}
+  const scenId = (typeof scenario === 'string') ? scenario : (scenario?.id || scenario);
+  const scenDef = SCENARIO_DEFS[scenId] || {};
+  session.scenario = scenId;
+  session.scenarioDef = scenDef;
+
+  // Load ocean location
+  const locationKey = scenDef.location || 'giuk_gap';
+  const location = getLocation(locationKey);
+  setOceanLocation(location);
+  setOceanComms(_COMMS);
+
+  // Initialise ocean environment with scenario season
+  const season = scenDef.season || 'winter';
+  initEnvironment(location, season);
+
+  // Update world dimensions from location data
+  if (location?.worldSize) {
+    world.w = location.worldSize;
+    world.h = location.worldSize;
+  }
+  // Set world.ground to deepest point in bathymetry
+  if (location?.bathymetry?.grid) {
+    world.ground = Math.max(1900, ...location.bathymetry.grid.flat());
+  }
+
+  // Player spawn position (fraction of world size, default centre)
+  session._playerSpawnX = (scenDef.spawnX ?? 0.5) * world.w;
+  session._playerSpawnY = (scenDef.spawnY ?? 0.5) * world.h;
+
   reset();
 }
 
 // ── Main update loop ────────────────────────────────────────────────────
 
-function update(dt){
+function update(rawDt){
   if(_I.justPressed('reload')){ window.location.reload(); }
 
   if(_I.justPressed('damageScreen')||_I.justPressed('damageScreenAlt')){ session.showDamageScreen=!session.showDamageScreen; }
   if(_I.justPressed('watchChange')){ initiateWatchChange(); }
   if(_I.justPressed('actionStations')){ _PANEL?.callActionStations(); }
+
+  // Time compression — multiply dt by compression factor
+  const dt = rawDt * (session.timeCompression || 1);
 
   // God mode -- restore hp to max every tick so damage can't stick
   if(session.godMode) player.hp=C.player.hpMax;
@@ -368,6 +445,11 @@ function update(dt){
   tickHotRun(dt);
   tickStuckPlanes(dt);
   tickSnorkelFlood(dt);
+
+  // ── Ocean environment tick (terrain collision, depth-under-keel) ──────
+  tickOcean(dt);
+  // ── Ocean environment model (SVP diurnal variation, propagation) ─────
+  tickEnvironment(dt);
 
   player.cmCd=Math.max(0,player.cmCd-dt);
   player.periscopeCd=Math.max(0,player.periscopeCd-dt);
@@ -432,23 +514,22 @@ function update(dt){
         const estRange=sc._estRange??null;
         _tdc.range=estRange!=null ? Math.round(estRange) : null;
 
-        // Speed estimate: at SOLID tier, use bearing rate x range / own-speed geometry
-        // v_target ~ brgRate * range (for targets moving roughly cross-track)
-        // Clamp to realistic sub speeds
+        // Speed estimate: bearing rate × range, converted to knots
         const brgRate=sc._brgRate??null;
         if(brgRate!=null && estRange!=null && tmaQ>=TMA.qualityThresholdSolid){
-          const rawSpd=Math.abs(brgRate)*estRange; // wu/s
-          _tdc.speed=Math.round(clamp(rawSpd,0,30));
+          const rawSpdWU=Math.abs(brgRate)*estRange; // wu/s
+          const rawSpdKts=rawSpdWU / (185.2/3600);  // convert to knots
+          _tdc.speed=Math.round(clamp(rawSpdKts,0,35));
         } else {
           _tdc.speed=null;
         }
 
-        // Course estimate: direction the target appears to be moving.
-        // If bearing is increasing, target is moving left-to-right relative to us;
-        // project course as 90deg offset from bearing (rough but directionally correct).
-        if(brgRate!=null && bestBrg!=null && tmaQ>=TMA.qualityThresholdSolid){
+        // Course estimate from bearing rate + estimated heading (if available)
+        if(sc._estHeading!=null && tmaQ>=TMA.qualityThresholdSolid){
+          // Use the computed heading estimate from sensors.js (bearing-rate + range-rate)
+          _tdc.course=((Math.atan2(Math.cos(sc._estHeading),-Math.sin(sc._estHeading))*180/Math.PI)+360)%360;
+        } else if(brgRate!=null && bestBrg!=null && tmaQ>=TMA.qualityThresholdSolid){
           const compassBrg=((Math.atan2(Math.cos(bestBrg),-Math.sin(bestBrg))*180/Math.PI)+360)%360;
-          // Positive brgRate = target moving right (clockwise), so course is brg+90
           const courseOffset=brgRate>0?90:-90;
           _tdc.course=((compassBrg+courseOffset)+360)%360;
         } else {
@@ -458,16 +539,16 @@ function update(dt){
         _tdc.range=null; _tdc.course=null; _tdc.speed=null;
       }
 
-      // Bearing rate: compute from last two hull bearings to get lead angle
-      // Only used for SOLID tier -- DEGRADED just uses raw bearing directly
+      // Intercept bearing: raw bearing + small lead angle
+      // Lead angle capped to prevent wild corrections at long range
       let intBearing=null;
       if(tmaQ>=TMA.qualityThresholdSolid && bestBrg!=null){
-        const brgRate=sc._brgRate??0; // rad/s, computed in passiveUpdate
-        // Lead angle: torpedo flight time * bearing rate gives angular correction
-        const torpSpd=C.torpedo.speed;
+        const brgRate=sc._brgRate??0;
+        const torpSpdWU=C.torpedo.speed * (185.2/3600);
         const estRange=(sc._estRange??TMA.defaultRange);
-        const tof=estRange/torpSpd;
-        intBearing=bestBrg + brgRate*tof*0.6; // 0.6 damp -- we're estimating
+        const tof=clamp(estRange/torpSpdWU, 0, 300); // cap TOF at 5 min
+        const leadAngle=clamp(brgRate*tof*0.6, -0.12, 0.12); // cap lead ±7°
+        intBearing=bestBrg + leadAngle;
       } else if(bestBrg!=null && tmaQ>=TMA.qualityThresholdRange){
         intBearing=bestBrg; // DEGRADED: no lead, fire down the bearing
       }
@@ -810,8 +891,8 @@ function update(dt){
       h.x=e.x; h.y=e.y;
       if(h.refuelT>0){ h.refuelT-=dt; }
       else {
-        // Launch when parent has suspicion
-        if(e.suspicion>=(cfg.launchSus||0.15) && e.contact){
+        // Launch when parent has a contact
+        if(e.contactState!=='NONE' && e.contact){
           h.state='transit';
           h.targetX=e.contact.x; h.targetY=e.contact.y;
           h.fuelT=cfg.fuel||120;
@@ -872,7 +953,7 @@ function update(dt){
       // Fresh contact + adequate suspicion is sufficient for a drop.
       const _heloContactAge = e.contact ? (now() - e.contact.t) : 999;
       if(cfg.hasTorp && h.torpStock>0 && h.torpCd<=0 &&
-         e.contact && _heloContactAge<12 && e.suspicion>=0.45){
+         e.contact && _heloContactAge<12 && (e.contactState==='IDENTIFIED'||e.contactState==='TRACKING')){
         const ddx=_AI.wrapDx(h.x,e.contact.x), ddy=e.contact.y-h.y;
         if(Math.hypot(ddx,ddy)<1800){
           _W.fireTorpedo(h.x,h.y, ddx,ddy, false,0, false,0, 5,cfg.dipDepth,
@@ -932,7 +1013,14 @@ function update(dt){
     _AI.updateEnemyNoise(e);
     if(e.type==='boat') _AI.shipActiveSonar(e,dt);
 
-    const state=(e.suspicion>C.enemy.susEngage)?"engage":(e.suspicion>C.enemy.susInvestigate?"investigate":"patrol");
+    // Contact-classification-driven state (replaces suspicion thresholds)
+    _AI.evaluateContactState(e);
+    const cs = e.contactState || 'NONE';
+    const state = cs === 'TRACKING'   ? 'engage'
+                : cs === 'IDENTIFIED' ? 'engage'
+                : cs === 'CLASSIFIED' ? 'investigate'
+                : cs === 'DETECTION'  ? 'investigate'
+                : 'patrol';
 
     if(e.type==="boat"){
       // -- Surface ships: 2D top-down movement using heading + physics model --
@@ -1031,7 +1119,7 @@ function update(dt){
           desiredHeading=e._idleHeading??e.heading;
         }
         // Commit to an attack run when: decent contact, sub is deep enough, not on cooldown
-        if(e.contact && contactAge<25 && e.suspicion>=0.32
+        if(e.contact && contactAge<25 && (e.contactState==='IDENTIFIED'||e.contactState==='TRACKING')
            && player.depth>80 && e._atkCooldown<=0){
           e._atkAim={x:e.contact.x, y:e.contact.y};
           e._atkDropsLeft=Math.round(rand(3,6));
@@ -1083,8 +1171,9 @@ function update(dt){
 
       // -- Apply speed (tau-based acceleration, same model as subs) -----------
       const curSpd=Math.hypot(e.vx,e.vy);
-      const shipTau=curSpd<targetSpd?60:30;
-      const newSpd=curSpd+(targetSpd-curSpd)/shipTau*dt;
+      const targetSpdWU2=_NAV.ktsToWU(targetSpd);
+      const shipTau=curSpd<targetSpdWU2?60:30;
+      const newSpd=curSpd+(targetSpdWU2-curSpd)/shipTau*dt;
       e.vx=Math.cos(e.heading)*newSpd;
       e.vy=Math.sin(e.heading)*newSpd;
 
@@ -1094,7 +1183,7 @@ function update(dt){
         e._asrocCd=Math.max(0,(e._asrocCd||rand(acfg.fireCd[0],acfg.fireCd[1]))-dt);
         if(e._asrocCd<=0 && e.contact && !session.over){
           const aAge=now()-e.contact.t;
-          if(aAge<acfg.contactMaxAge && e.suspicion>=acfg.susThresh){
+          if(aAge<acfg.contactMaxAge && (e.contactState==='IDENTIFIED'||e.contactState==='TRACKING')){
             const adx=_AI.wrapDx(e.x,e.contact.x), ady=e.contact.y-e.y;
             const adist=Math.hypot(adx,ady);
             if(adist>=acfg.minRange && adist<=acfg.maxRange){
@@ -1135,6 +1224,7 @@ function update(dt){
         if(Math.random()>pDetect) continue;
         b._alertedEnemy=e;
         e.suspicion=Math.min(1,e.suspicion+0.15);
+        _AI.promoteContactState(e, 'IDENTIFIED'); // incoming torpedo = hostile confirmed
         if(e.flareCd<=0){
           e.flareCd=rand(3.5,6.0);
           _W.deployDecoy(wrapX(e.x+rand(-30,30)),e.hitY+rand(10,30),false,"noisemaker",{vx:rand(-2,2),vy:rand(2,5)});
@@ -1173,12 +1263,12 @@ function update(dt){
           // Layer exploitation -- sometimes skip for speed-priority evasion
           const evCfg = C.enemy.evasion||{};
           if(Math.random() >= (evCfg.skipLayerChance??0.25)){
-            const layerMid = ((world.layerY1||180)+(world.layerY2||280))/2;
+            const layerDepth = oceanEnv.svp.mixedLayerDepth || world.layerY1 || 180;
             const torpDepth = e.evadeFrom ? (e.evadeFrom.depth??300) : 300;
-            if(torpDepth < layerMid){
-              e.depthOrder = rand((world.layerY2||280)+60, (world.layerY2||280)+300);
+            if(torpDepth < layerDepth){
+              e.depthOrder = rand(layerDepth+60, layerDepth+300);
             } else {
-              e.depthOrder = rand(40, (world.layerY1||180)-40);
+              e.depthOrder = rand(40, Math.max(50, layerDepth-40));
             }
           }
           // else: keep current depthOrder -- prioritise speed over depth
@@ -1253,36 +1343,35 @@ function update(dt){
         const contactBrg=Math.atan2(dy,dx);
         const dist=Math.hypot(dx,dy);
 
-        if(e.tmaPhase==='close' || (hasFix && dist<800)){
-          // Close for the kill
+        if(e.tmaPhase==='close' || (hasFix && dist<300)){
+          // Close for the kill — only when solution is solid and close
           desiredHeading=contactBrg;
           e.tmaPhase='close';
-          if(e.navT<=0) e.navT=5;
+          if(e.navT<=0) e.navT=10;
         } else if(e.tmaPhase==='sprint'){
-          // Cross-track sprint -- run perpendicular to bearing for 25-40s
+          // Cross-track sprint — run perpendicular to bearing to build baseline
+          // Longer sprints at realistic scale (60-120s at 14kt ≈ 0.3-0.6nm baseline)
           const perpA=contactBrg+Math.PI/2, perpB=contactBrg-Math.PI/2;
-          const curH=e.heading||0;
           const sprintDir=e.tmaManeuverDir||1;
           desiredHeading=sprintDir>0?perpA:perpB;
           if(e.navT<=0){
-            // Switch to drift phase -- slow down and listen
             e.tmaPhase='drift';
-            e.navT=rand(20,35);
+            e.navT=rand(60,120); // long drift to accumulate bearings
           }
         } else {
-          // Drift -- slow and listen, build bearing observations
-          desiredHeading=contactBrg; // creep toward contact
+          // Drift — slow and listen, build bearing observations
+          // Patient prosecution: creep toward contact, listen carefully
+          desiredHeading=contactBrg;
           if(e.navT<=0){
-            // Contact-loss silence: if contact stale and suspicion low, hold quiet to listen
             const contactFresh=e.contact&&(now()-e.contact.t<C.enemy.contactMaxAge*0.5);
-            if(!contactFresh && e.suspicion<0.35){
-              // Stay in drift -- go silent and wait for passive to pick something up
-              e.navT=rand(25,45);
+            if(!contactFresh && (cs==='DETECTION'||cs==='CLASSIFIED'||cs==='NONE')){
+              // No fresh contact — go silent and wait
+              e.navT=rand(60,120);
             } else {
-              // Switch to cross-track sprint -- always alternate direction for better baseline
+              // Sprint to build baseline — alternate direction
               e.tmaPhase='sprint';
               e.tmaManeuverDir=-(e.tmaManeuverDir||1);
-              e.navT=rand(25,40);
+              e.navT=rand(60,120); // longer sprint legs for meaningful baseline
             }
           }
         }
@@ -1297,17 +1386,17 @@ function update(dt){
           const perpA=contactBrg+Math.PI/2, perpB=contactBrg-Math.PI/2;
           const sprintDir=e.tmaManeuverDir||1;
           desiredHeading=sprintDir>0?perpA:perpB;
-          if(e.navT<=0){ e.tmaPhase='drift'; e.navT=rand(15,25); }
+          if(e.navT<=0){ e.tmaPhase='drift'; e.navT=rand(45,90); }
         } else {
           desiredHeading=contactBrg;
           if(e.navT<=0){
-            // After first observation, start cross-track runs
-            if((e.playerBearings||[]).length>=2){
+            // After accumulating bearings, start cross-track runs
+            if((e.playerBearings||[]).length>=3){
               e.tmaPhase='sprint';
               e.tmaManeuverDir=-(e.tmaManeuverDir||1);
-              e.navT=rand(20,35);
+              e.navT=rand(60,100); // longer sprints for baseline at range
             } else {
-              e.navT=rand(10,18);
+              e.navT=rand(30,60); // patient — listen before manoeuvring
             }
           }
         }
@@ -1319,22 +1408,18 @@ function update(dt){
           e.navT=rand(C.enemy.subNavT[0], C.enemy.subNavT[1]);
           const maxPatrolTurn=Math.PI*0.33;
           if(e.role==='ssbn'){
-            // SSBNs patrol on long straight legs, biased AWAY from player
-            e._ssbnEvading=false; // reset evasion flag
-            e.navT=rand(300,500); // very long legs
-            const tdx=_AI.wrapDx(e.x,player.wx), tdy=player.wy-e.y;
-            const awayFromPlayer=Math.atan2(-tdy,-tdx);
-            e.patrolHeading=angleNorm(awayFromPlayer+rand(-0.6,0.6));
+            // SSBNs patrol on long straight legs in their assigned area
+            e._ssbnEvading=false;
+            e.navT=rand(300,500);
+            // Random heading — SSBN patrols assigned bastion, doesn't know player position
+            e.patrolHeading=angleNorm((e.patrolHeading??e.heading??0)+rand(-0.4,0.4));
           } else if(e.role==='pinger'){
             // Pingers maintain cross-track barrier pattern
             e.patrolHeading=angleNorm((e.patrolHeading??e.heading??0)+rand(-maxPatrolTurn,maxPatrolTurn));
           } else {
-            // Compute direction toward player, bias new heading that way
-            const tdx=_AI.wrapDx(e.x,player.wx), tdy=player.wy-e.y;
-            const towardPlayer=Math.atan2(tdy,tdx);
-            // Blend: 60% toward player, 40% random drift -- stays roughly convergent
-            const biased=angleNorm(towardPlayer+rand(-maxPatrolTurn,maxPatrolTurn));
-            e.patrolHeading=biased;
+            // Random patrol heading — crew doesn't know player position during patrol
+            // Gentle turns, long legs, covering their patrol area
+            e.patrolHeading=angleNorm((e.patrolHeading??e.heading??0)+rand(-maxPatrolTurn,maxPatrolTurn));
           }
         }
         desiredHeading=e.patrolHeading??e.heading??0;
@@ -1346,6 +1431,25 @@ function update(dt){
         e._postFireT-=dt;
         desiredHeading=e._postFireHdg??desiredHeading;
         e.tmaPhase='drift'; // go quiet after launch -- don't sprint around
+      }
+
+      // -- Listening stop -- periodic near-stop to really listen -----------------
+      // Elite crew doctrine: every 3-5 minutes, come to near-stop for 30-60s.
+      // This is when the enemy actually detects quiet contacts at range.
+      if(state==='patrol' && !e.evadeT && !((e._postFireT||0)>0)){
+        e._listenStopT=(e._listenStopT??rand(120,300))-dt;
+        if(e._listeningStop){
+          e._listenStopDur=(e._listenStopDur||0)-dt;
+          if(e._listenStopDur<=0){
+            e._listeningStop=false;
+            e._listenStopT=rand(180,300); // next stop in 3-5 min
+          }
+        } else if(e._listenStopT<=0){
+          e._listeningStop=true;
+          e._listenStopDur=rand(60,120); // listen for 60-120s (need time to decelerate)
+        }
+      } else {
+        e._listeningStop=false; // not patrolling — no listening stops
       }
 
       // -- Baffle-clear maneuver -- periodic listen stop -----------------------
@@ -1378,16 +1482,22 @@ function update(dt){
           const needsTarget=!e.interceptTargetX ||
             (e.interceptState==='sprinting' && e.interceptArrived);
           if(needsTarget && e.contact){
-            // Project player position forward by leadTime seconds
+            // Intercept based on OWN contact data — no true player position
+            // Use contact position + estimated heading from TMA bearing rate
             const leadT=C.enemy.interceptorLeadTime||90;
-            const ktsToWU=_NAV.ktsToWU;
-            const pVx=Math.cos(player.heading)*ktsToWU(player.speed);
-            const pVy=Math.sin(player.heading)*ktsToWU(player.speed);
-            const projX=player.wx+pVx*leadT;
-            const projY=player.wy+pVy*leadT;
-            // Offset perpendicular -- sit off their projected track slightly
-            const perpOff=(Math.random()<0.5?1:-1)*rand(300,600);
-            const perpAng=player.heading+Math.PI/2;
+            const cx=e.contact.x, cy=e.contact.y;
+            // Estimate target motion from bearing history (if available)
+            let projX=cx, projY=cy;
+            if(e._estHeading!=null && e.tmaQuality>=0.30){
+              // Project along estimated heading at assumed 7kt patrol speed
+              const estSpdWU=_NAV.ktsToWU(7);
+              projX=cx+Math.cos(e._estHeading)*estSpdWU*leadT;
+              projY=cy+Math.sin(e._estHeading)*estSpdWU*leadT;
+            }
+            // Offset perpendicular to estimated track
+            const estHdg=e._estHeading??Math.atan2(cy-e.y,_AI.wrapDx(e.x,cx));
+            const perpOff=(Math.random()<0.5?1:-1)*rand(150,400);
+            const perpAng=estHdg+Math.PI/2;
             e.interceptTargetX=projX+Math.cos(perpAng)*perpOff;
             e.interceptTargetY=projY+Math.sin(perpAng)*perpOff;
             e.interceptState='sprinting';
@@ -1440,10 +1550,13 @@ function update(dt){
         :state==='engage'?5          // drift: slow and quiet to listen
         :state==='investigate'&&sprintPhase?10
         :state==='investigate'?5
-        :7;
+        :e._listeningStop?rand(2,3)  // periodic listening stop — near-silent
+        :5;                          // patrol at 5kt — need to listen
       const curSpd=Math.hypot(e.vx,e.vy);
+      // Target speed is in knots — convert to wu/s for velocity
+      const targetSpdWU = _NAV.ktsToWU(targetSpd);
       // Damage speed cap -- propulsion casualty from torpedo hit (set in damageEnemy)
-      const cappedTargetSpd = targetSpd * (e._dmgSpeedCapMult ?? 1.0);
+      const cappedTargetSpd = targetSpdWU * (e._dmgSpeedCapMult ?? 1.0);
       // Tau-based acceleration -- matches realistic SSN build/decay rates
       // Subs accelerate slower than they decelerate (prop drag)
       const eTau = curSpd < cappedTargetSpd ? 40 : 25;
@@ -1465,10 +1578,28 @@ function update(dt){
           }
         } else if(state==='engage'){
           e.depthChangeT=rand(120,240);
-          e.depthOrder=rand(100,500);
+          // Engage: stay below layer for concealment if layer exists
+          const layerD=oceanEnv.propagation.layerDepth||200;
+          const layerExists=oceanEnv.propagation.layerStrength>0.1;
+          if(layerExists){
+            e.depthOrder=rand(layerD+30, layerD+200); // just below the layer
+          } else {
+            e.depthOrder=rand(150,400);
+          }
         } else {
+          // Patrol: smart crew patrols below the layer to hide from surface sonar
           e.depthChangeT=rand(300,720);
-          e.depthOrder=rand(150,600);
+          const layerD=oceanEnv.propagation.layerDepth||200;
+          const layerExists=oceanEnv.propagation.layerStrength>0.1;
+          if(layerExists && e.role!=='ssbn'){
+            // SSN/hunter: below layer, varying depth to avoid being predictable
+            e.depthOrder=rand(layerD+20, layerD+180);
+          } else if(e.role==='ssbn'){
+            // SSBN: deep — maximise concealment
+            e.depthOrder=rand(250,450);
+          } else {
+            e.depthOrder=rand(150,400);
+          }
         }
       }
       e.depthChangeT-=dt;
@@ -1476,7 +1607,8 @@ function update(dt){
         const maxRate=(e.evadeT>0)?3.5:1.2;
         const depthErr=e.depthOrder-e.depth;
         const rate=Math.min(maxRate,Math.abs(depthErr)*0.06+0.1);
-        e.depth=clamp(e.depth+Math.sign(depthErr)*rate*dt, 30, world.ground-80);
+        const _eSeabed = _OCEAN?.seabedDepthAt?.(e.x, e.y) ?? world.ground;
+        e.depth=clamp(e.depth+Math.sign(depthErr)*rate*dt, 30, Math.max(30, _eSeabed-40));
       }
 
       // -- Ping -- pingers ping aggressively; tactical pingers ping when stuck ----
@@ -1496,7 +1628,7 @@ function update(dt){
       if(e.tacticalPing && !isPinger && e.pingCd<=0 && !e.evadeT){
         const hasBearings=(e.playerBearings||[]).length>=2;
         const tmaStuck=(e.tmaQuality||0)<(e.tacticalPingTmaThresh??0.25);
-        const suspicious=e.suspicion>=(e.tacticalPingSusThresh??0.15);
+        const suspicious=cs==='CLASSIFIED'||cs==='IDENTIFIED'||cs==='TRACKING';
         // Track how long TMA has been stuck -- don't ping immediately, wait for passive to fail
         if(hasBearings && tmaStuck && suspicious){
           e._tmaStuckT=(e._tmaStuckT||0)+dt;
@@ -1553,27 +1685,29 @@ function update(dt){
           const layer=_AI.layerPenalty(player.depth,e.y);
           const maxD=(layer<1)?2200:2800;
           if(d<maxD){
-            // Intercept bearing using TMA-estimated player velocity
-            // Use true player pos blurred by TMA quality -- not perfect aim
-            // Fire adaptation: tighten blur based on previous misses
-            const adaptCfg=C.enemy.adaptation||{};
-            const adaptPenalty=1-Math.min((e._missCount||0)*(adaptCfg.blurReductionPerMiss??0.15), 1-(adaptCfg.blurFloor??0.50));
-            const blur=clamp((1-tmaQ)*400, 0, 350)*adaptPenalty;
-            const ftx=player.wx+rand(-blur,blur);
-            const fty=player.wy+rand(-blur,blur);
-            const ftvx=Math.cos(player.heading)*_NAV.ktsToWU(player.speed);
-            const ftvy=Math.sin(player.heading)*_NAV.ktsToWU(player.speed);
-            const ftDepth=player.depth??200;
-            const torpSpd=C.torpedo.speed;
-            let intBearing=Math.atan2(dy,dx);
-            const ftDist=Math.hypot(_AI.wrapDx(e.x,ftx),fty-e.y);
-            let tof=ftDist/torpSpd;
-            for(let i=0;i<6;i++){
-              const ex2=ftx+ftvx*tof, ey2=fty+ftvy*tof;
-              tof=Math.hypot(_AI.wrapDx(e.x,ex2),ey2-e.y)/torpSpd;
+            // Fire on OWN TMA data — no true player position
+            // Use contact position + estimated heading from bearing history
+            const ftx=e.contact.x;
+            const fty=e.contact.y;
+            // Estimated target depth from TMA (noisy)
+            const ftDepth=(e.tmaQuality>=0.35 && e._estDepth!=null)
+              ? e._estDepth : (e.contact.y > e.y ? 250 : 150); // guess based on relative position
+            const torpSpdWU=(C.enemy.subTorpSpeed??40)*(185.2/3600);
+            let intBearing=Math.atan2(dy,dx); // bearing to contact
+            // Lead angle from estimated heading if TMA quality supports it
+            if(e._estHeading!=null && e.tmaQuality>=0.40){
+              const estSpdWU=_NAV.ktsToWU(7); // assume patrol speed
+              const ftDist=Math.hypot(_AI.wrapDx(e.x,ftx),fty-e.y);
+              let tof=ftDist/torpSpdWU;
+              for(let i=0;i<4;i++){
+                const ex2=ftx+Math.cos(e._estHeading)*estSpdWU*tof;
+                const ey2=fty+Math.sin(e._estHeading)*estSpdWU*tof;
+                tof=Math.hypot(_AI.wrapDx(e.x,ex2),ey2-e.y)/torpSpdWU;
+              }
+              const predX=ftx+Math.cos(e._estHeading)*estSpdWU*tof;
+              const predY=fty+Math.sin(e._estHeading)*estSpdWU*tof;
+              intBearing=Math.atan2(predY-e.y,_AI.wrapDx(e.x,predX));
             }
-            const predX=ftx+ftvx*tof, predY=fty+ftvy*tof;
-            intBearing=Math.atan2(predY-e.y,_AI.wrapDx(e.x,predX));
             const shot=clampConeDual(Math.cos(intBearing),Math.sin(intBearing),
               e.heading||Math.atan2(e.vy,e.vx),C.enemy.subTorpArcDeg);
             const off=e.r*1.25;
@@ -1637,7 +1771,7 @@ function update(dt){
           const recentObs=obs.filter(o=>(session.missionT||0)-o.t<30);
           const roleQ = e.role==='ssbn'?0.80:e.role==='zeta'?0.28:e.role==='hunter'?0.35:0.30;
           const stuck=tmaQ<roleQ && recentObs.length>=3;
-          const suspicious=e.suspicion>=(e.bearingOnlySusThresh??0.35);
+          const suspicious=cs==='IDENTIFIED'||cs==='TRACKING';
           const tubeReady=e.torpTubes?.findIndex(t=>t<=0)>=0;
           const eLaunchKts=Math.hypot(e.vx,e.vy);
           if(stuck && suspicious && tubeReady && eLaunchKts<=(C.player.wireMaxLaunchKts??15)){
@@ -1648,7 +1782,9 @@ function update(dt){
             const off=e.r*1.25;
             const sx=e.x+(shot.isRear?-Math.cos(e.heading):Math.cos(e.heading))*off;
             const sy=e.y+(shot.isRear?-Math.sin(e.heading):Math.sin(e.heading))*off;
-            const estDepth=player.depth+rand(-120,120);
+            // Depth estimate from own TMA — no true player depth
+            const estDepth=e._estDepth!=null ? e._estDepth+rand(-80,80)
+              : (e.depth||300)+rand(-150,150); // guess if no TMA depth
             _W.fireTorpedo(sx,sy,shot.dx,shot.dy,false,260,false,0,e.depth||300,
               clamp(estDepth,30,700),{
                 speed:     C.enemy.subTorpSpeed??26,
@@ -1702,6 +1838,7 @@ function update(dt){
         if(closestTorp){
           const b=closestTorp;
           e.suspicion=Math.min(1,e.suspicion+0.30);
+          _AI.promoteContactState(e, 'IDENTIFIED'); // incoming torpedo = hostile confirmed
 
           // Extend evade timer: keep running while torpedo is still inside react range
           // Initial trigger: 25-35s. Each re-evaluation while still close: refresh to at least 8s.
@@ -1717,7 +1854,7 @@ function update(dt){
             // hold remaining as follow-up if first salvo fails to deter.
             if(!e._cfPhase){
               // Check if this torpedo is actually aimed at us
-              const torpHdg=Math.atan2(b.dy||0, b.dx||0);
+              const torpHdg=Math.atan2(b.vy||0, b.vx||0);
               const brgToUs=Math.atan2(e.y-b.y, _AI.wrapDx(b.x,e.x));
               let hdgDiff=Math.abs(torpHdg-brgToUs);
               if(hdgDiff>Math.PI) hdgDiff=2*Math.PI-hdgDiff;
@@ -1740,7 +1877,7 @@ function update(dt){
           }
 
           // Update evadeFrom to current torpedo position every frame -- heading stays fresh
-          e.evadeFrom={x:b.x, y:b.y};
+          e.evadeFrom={x:b.x, y:b.y, depth:b.depth??200};
           if(e._cfPhase) e._cfTorpBrg=Math.atan2(b.y-e.y, _AI.wrapDx(e.x,b.x));
 
           // Immediate CM drop on first alert, then again mid-evasion if still chased
@@ -1768,31 +1905,35 @@ function update(dt){
                 // Fire one tube with degraded intercept prediction
                 const tubeIdx=(e.torpTubes||[]).findIndex(t=>t<=0);
                 if(tubeIdx>=0 && e._cfShotsLeft>0){
-                  // Degraded intercept: panic blur + fewer iterations
-                  const tmaQ=e.tmaQuality||0;
-                  const baseBlur=clamp((1-tmaQ)*400, 0, 350);
-                  const panicBlur=baseBlur*(cfCfg.panicBlurMult??2.5);
-                  const ftx=player.wx+rand(-panicBlur,panicBlur);
-                  const fty=player.wy+rand(-panicBlur,panicBlur);
-                  const ftvx=Math.cos(player.heading)*_NAV.ktsToWU(player.speed);
-                  const ftvy=Math.sin(player.heading)*_NAV.ktsToWU(player.speed);
-                  const torpSpd=C.enemy.subTorpSpeed??45;
-                  const ftDist=Math.hypot(_AI.wrapDx(e.x,ftx),fty-e.y);
-                  let tof=ftDist/torpSpd;
-                  const iters=cfCfg.iterCount??4;
-                  for(let i=0;i<iters;i++){
-                    const ex2=ftx+ftvx*tof, ey2=fty+ftvy*tof;
-                    tof=Math.hypot(_AI.wrapDx(e.x,ex2),ey2-e.y)/torpSpd;
+                  // Counter-fire on OWN contact data — panic shot, degraded accuracy
+                  // Uses contact position, NOT true player position
+                  const ftx=e.contact?.x ?? e.x;
+                  const fty=e.contact?.y ?? e.y;
+                  const torpSpd=(C.enemy.subTorpSpeed??40)*(185.2/3600); // wu/s
+                  let intBrg=Math.atan2(fty-e.y,_AI.wrapDx(e.x,ftx));
+                  // Lead angle from estimated heading (if available)
+                  if(e._estHeading!=null && (e.tmaQuality||0)>=0.30){
+                    const estSpdWU=_NAV.ktsToWU(7);
+                    const ftDist=Math.hypot(_AI.wrapDx(e.x,ftx),fty-e.y);
+                    let tof=ftDist/torpSpd;
+                    const iters=cfCfg.iterCount??4;
+                    for(let i=0;i<iters;i++){
+                      const ex2=ftx+Math.cos(e._estHeading)*estSpdWU*tof;
+                      const ey2=fty+Math.sin(e._estHeading)*estSpdWU*tof;
+                      tof=Math.hypot(_AI.wrapDx(e.x,ex2),ey2-e.y)/torpSpd;
+                    }
+                    const predX=ftx+Math.cos(e._estHeading)*estSpdWU*tof;
+                    const predY=fty+Math.sin(e._estHeading)*estSpdWU*tof;
+                    intBrg=Math.atan2(predY-e.y,_AI.wrapDx(e.x,predX));
                   }
-                  const predX=ftx+ftvx*tof, predY=fty+ftvy*tof;
-                  let intBrg=Math.atan2(predY-e.y,_AI.wrapDx(e.x,predX));
-                  // Clamp to firing arc
                   const shot=clampConeDual(Math.cos(intBrg),Math.sin(intBrg),
                     e.heading||Math.atan2(e.vy||0,e.vx||0),C.enemy.subTorpArcDeg);
                   const off=(e.r||20)*1.25;
                   const sx=wrapX(e.x+Math.cos(e.heading)*off);
                   const sy=e.y+Math.sin(e.heading)*off;
-                  const estDepth=player.depth+rand(-80,80);
+                  // Depth from own TMA estimate
+                  const estDepth=e._estDepth!=null ? e._estDepth+rand(-80,80)
+                    : (e.depth||300)+rand(-150,150);
                   _W.fireTorpedo(sx,sy,shot.dx,shot.dy,false,260,false,0,e.depth||300,
                     clamp(estDepth,30,700),{
                       speed:torpSpd, life:C.enemy.subTorpLife??220,
@@ -1894,7 +2035,8 @@ function update(dt){
       b.vy = lerp(b.vy,b.sink,0.08);
       b.x = wrapX(b.x + b.vx*dt);
       b.y += b.vy*dt;
-      if(b.y>=b.targetY || b.y>=world.ground-12){
+      const _dcSeabed = _OCEAN?.seabedDepthAt?.(b.x, b.y) ?? world.ground;
+      if(b.y>=b.targetY || b.y>=_dcSeabed-12){
         _W.makeExplosion(b.x,b.y,1.15,true);
         const dxp=_AI.wrapDx(b.x,player.wx);
         const dyp=player.depth-b.y;

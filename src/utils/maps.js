@@ -23,8 +23,8 @@ const coastalMap = {
   name: "COASTAL PATROL",
   seaColour: "#daeaf7",
   land: [],
-  playerSpawn: { wx: 4000, wy: 5000 },
-  enemySpawnBias: { cx: 6000, cy: 7000 },
+  playerSpawn: null, // use world centre default from sim/index.js
+  enemySpawnBias: null,
 };
 
 const maps = { coastal: coastalMap };

@@ -8,6 +8,10 @@
 import { CONFIG } from '../config/constants.js';
 import { clamp, lerp, angleNorm } from '../utils/math.js';
 import { world, player, enemies, decoys } from '../state/sim-state.js';
+import { seabedDepthAt } from './ocean.js';
+
+// Speed conversion: weapon speeds in config are in knots
+const KTS_TO_WU = 185.2 / 3600;
 import { setMsg, addLog } from '../state/session-state.js';
 
 // ── Lazy bindings for circular deps ─────────────────────────────────────
@@ -258,9 +262,10 @@ function update(torp, dt){
   }
 
   // ── 5. Speed — approach while searching, sprint when homing ──────────────
-  const targetSpd=(torp.target||torp.seducedBy)
+  const targetSpdKts=(torp.target||torp.seducedBy)
     ? (torp.speed??cfg.speed)
     : (torp.approachSpeed??cfg.approachSpeed??15);
+  const targetSpd=targetSpdKts*KTS_TO_WU;
   const ns=lerp(spd, targetSpd, 0.06);
   const ang=Math.atan2(torp.vy,torp.vx);
   torp.vx=Math.cos(ang)*ns;
@@ -275,7 +280,8 @@ function update(torp, dt){
     const depthErr=(torp.depthOrder??torp.depth??200)-(torp.depth??0);
     const dv=clamp(depthErr*0.8,-depthRate,depthRate);
     torp.vDepth=lerp(torp.vDepth||0, dv, 0.15);
-    torp.depth=clamp((torp.depth||0)+torp.vDepth*dt, 10, world.ground-20);
+    const _torpSeabed = seabedDepthAt(torp.x, torp.y);
+    torp.depth=clamp((torp.depth||0)+torp.vDepth*dt, 10, Math.max(10, _torpSeabed-20));
   }
 
   // ── 7. Position ───────────────────────────────────────────────────────────

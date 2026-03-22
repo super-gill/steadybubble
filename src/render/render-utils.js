@@ -21,7 +21,9 @@ export function getCtx() { return ctx; }
 export function getDPR() { return DPR; }
 
 // PANEL_H and STRIP_W — scaled to canvas pixels
-export function getPanelH() { return U(CONFIG.layout.panelH); }
+// Panel height is dynamic: collapsed shows only tab bar (~22u), expanded shows full panel
+import { ui } from '../state/ui-state.js';
+export function getPanelH() { return ui.panelCollapsed ? U(24) : U(CONFIG.layout.panelH); }
 export function getStripW() { return U(CONFIG.layout.depthStripW); }
 
 // ── Drawing primitives ────────────────────────────────────────────────────────
@@ -53,13 +55,25 @@ export function w2s(wx, wy) {
 }
 export function wScale(wu) { return wu * cam.zoom * DPR; }
 
+// ── Screen → world ─────────────────────────────────────────────────────────────
+export function s2w(sx, sy) {
+  const Z = cam.zoom * DPR;
+  const stripW = getStripW();
+  const panelH = getPanelH();
+  const cx2 = (canvas.width - stripW) / 2;
+  const cy2 = (canvas.height - panelH) / 2;
+  const wx = cam.x + (sx - cx2) / Z;
+  const wy = cam.y + (sy - cy2) / Z;
+  return [wx, wy];
+}
+
 // Re-export U and uiFont for convenience (many render modules need them)
 export { U, uiFont };
 
 // ── Aggregate export (mirrors V1 window.R shape) ────────────────────────────
 // PANEL_H and STRIP_W are getters so they re-evaluate when DPR changes.
 export const R = {
-  doodleLine, doodleCircle, doodleText, w2s, wScale, U,
+  doodleLine, doodleCircle, doodleText, w2s, s2w, wScale, U,
   get PANEL_H() { return getPanelH(); },
   get STRIP_W() { return getStripW(); },
   get canvas() { return canvas; },

@@ -6,6 +6,7 @@ import {
   solveEnemyTMA, enemyRegisterBearing, enemyHasFireSolution,
   enemyUpdateContactFromPing, enemyMaybeHearPlayer,
   enemySpeedDeafness, enemyDecay, updateEnemyNoise,
+  evaluateContactState, promoteContactState,
 } from './perception.js';
 
 import {
@@ -29,6 +30,7 @@ export { _bindComms };
 export const AI = {
   wrapDx,wrapDy,layerPenalty,enemyHasFireSolution,enemyUpdateContactFromPing,
   enemyMaybeHearPlayer,enemyDecay,updateEnemyNoise,solveEnemyTMA,enemyRegisterBearing,
+  evaluateContactState,promoteContactState,
   spawnEnemy,spawnSub,spawnSSBN,spawnZeta,spawnGamma,spawnEta,spawnEpsilon,spawnTheta,
   spawnNovember,spawnWhiskey,spawnYankee,spawnPapa,spawnGolf,
   spawnIota,spawnKappa,spawnLambda,spawnMu,spawnCivilian,wolfpackShareDatum,shipShareContact,

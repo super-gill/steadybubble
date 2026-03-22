@@ -9,6 +9,7 @@ import {
 } from './panel-context.js';
 import { drawTdcSection } from './render-tdc.js';
 import { isTorpLoad } from '../../config/constants.js';
+import { env, isBelowLayer, temperatureAtDepth } from '../../systems/ocean-environment.js';
 
   export function drawPanel(W,H){
     const ctx = L.ctx;
@@ -19,7 +20,7 @@ import { isTorpLoad } from '../../config/constants.js';
     PANEL.clearBtns();
 
     const panelH=PANEL_H;
-    const panelY=H-panelH;
+    let panelY=H-panelH;
     const panelW=W-STRIP_W;
 
     // Background
@@ -91,15 +92,7 @@ import { isTorpLoad } from '../../config/constants.js';
     ctx.font=`${U(TH.font.header)}px ${TH.FONT_FAMILY}`;
     ctx.textAlign='left';
     ctx.fillText('DEPTH ORDER',x,panelY+U(18));
-    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
-    ctx.fillText('ACTUAL',x,panelY+U(33));
-    ctx.fillStyle=TH.color.text.primary; ctx.font=`${U(TH.font.valueLg)}px ${TH.FONT_FAMILY}`;
-    ctx.fillText(`${Math.round(player.depth)}m`,x,panelY+U(50));
-    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
-    ctx.fillText('ORDERED',x+U(64),panelY+U(33));
-    ctx.fillStyle=TH.color.text.primary; ctx.font=`${U(TH.font.valueLg)}px ${TH.FONT_FAMILY}`;
-    ctx.fillText(`${Math.round(player.depthOrder)}m`,x+U(64),panelY+U(50));
-    const arrowY=panelY+U(62);
+    const arrowY=panelY+U(30);
     const arrowH=U(20);
     const aGap=U(4);
     const aHalf=(w-pad-aGap)/2;
@@ -107,10 +100,10 @@ import { isTorpLoad } from '../../config/constants.js';
     btn('\u25b2 10',x+aHalf+aGap,arrowY,aHalf,arrowH,false,()=>PANEL.depthStep(-10));
     btn('\u25bc 50',x,       arrowY+arrowH+U(3),aHalf,arrowH,false,()=>PANEL.depthStep(50));
     btn('\u25bc 10',x+aHalf+aGap,arrowY+arrowH+U(3),aHalf,arrowH,false,()=>PANEL.depthStep(10));
-    const pdY=panelY+U(110);
+    const pdY=panelY+U(80);
     const atPD=player.depthOrder<=C.player.periscopeDepth+10;
     btn('COME TO PD',x,pdY,w-pad,U(20),atPD,()=>PANEL.comeToPD(),'#1e3a5f');
-    const batY=panelY+U(138);
+    const batY=panelY+U(108);
     const batFrac=clamp(player.battery??1.0, 0, 1);
     const batPct=Math.round(batFrac*100);
     const batBarW=w-pad;
@@ -128,7 +121,7 @@ import { isTorpLoad } from '../../config/constants.js';
     ctx.textAlign='right';
     const batStatus=player._battDead?'DEAD':player.snorkeling?'CHRG':(player.snorkelOrdered?'RISG':'');
     ctx.fillText(batPct+'%'+(batStatus?' '+batStatus:''), x+batBarW, batY-U(3));
-    const snkY=panelY+U(152);
+    const snkY=panelY+U(122);
     const snkH=U(22);
     if(C.player.isDiesel){
       const ordered=player.snorkelOrdered||false;
@@ -139,6 +132,68 @@ import { isTorpLoad } from '../../config/constants.js';
       ctx.textAlign='left';
       ctx.fillText('NUCLEAR \u2014 NO SNORKEL',x,snkY+U(9));
     }
+    ctx.textAlign='left';
+    }
+
+    function drawEnvironmentSection(x, w) {
+    ctx.fillStyle=TH.color.header;
+    ctx.font=`${U(TH.font.header)}px ${TH.FONT_FAMILY}`;
+    ctx.textAlign='left';
+    ctx.fillText('ENVIRONMENT',x,panelY+U(18));
+
+    // Row 1: ACTUAL depth / ORDERED depth
+    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText('ACTUAL',x,panelY+U(33));
+    ctx.fillText('ORDERED',x+U(64),panelY+U(33));
+    ctx.fillStyle=TH.color.text.primary; ctx.font=`${U(TH.font.valueLg)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText(`${Math.round(player.depth)}m`,x,panelY+U(48));
+    ctx.fillText(`${Math.round(player.depthOrder)}m`,x+U(64),panelY+U(48));
+
+    // Row 2: WATER depth / DUK
+    const _waterD = player.seabedDepth ?? 0;
+    const _duk = player.depthUnderKeel ?? 0;
+    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText('WATER',x,panelY+U(60));
+    ctx.fillText('DUK',x+U(64),panelY+U(60));
+    ctx.fillStyle=_duk<50?'rgba(220,60,30,0.90)':TH.color.text.primary;
+    ctx.font=`${U(TH.font.value)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText(`${Math.round(_waterD)}m`,x,panelY+U(72));
+    ctx.fillText(`${Math.round(_duk)}m`,x+U(64),panelY+U(72));
+
+    // Row 3: LAYER / SEA STATE
+    const _layerD = env.propagation.layerDepth;
+    const _layerStr = env.propagation.layerStrength;
+    const _belowLayer = isBelowLayer(player.depth);
+    const _hasLayer = _layerStr > 0.05;
+    const _layerLabel = !_hasLayer ? 'NIL' : _layerStr >= 0.7 ? 'STRONG' : _layerStr >= 0.4 ? 'MOD' : 'WEAK';
+    const _layerCol = !_hasLayer ? 'rgba(120,120,120,0.60)' : _layerStr >= 0.7 ? 'rgba(60,200,120,0.90)' : _layerStr >= 0.4 ? 'rgba(180,180,60,0.90)' : 'rgba(200,100,60,0.90)';
+    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText('LAYER',x,panelY+U(84));
+    ctx.fillText('SEA ST',x+U(64),panelY+U(84));
+    if(_hasLayer){
+      ctx.fillStyle=_belowLayer?'rgba(60,180,220,0.90)':TH.color.text.primary;
+      ctx.font=`${U(TH.font.value)}px ${TH.FONT_FAMILY}`;
+      ctx.fillText(`${Math.round(_layerD)}m`,x,panelY+U(96));
+    } else {
+      ctx.fillStyle='rgba(120,120,120,0.60)';
+      ctx.font=`${U(TH.font.value)}px ${TH.FONT_FAMILY}`;
+      ctx.fillText('\u2014',x,panelY+U(96)); // em dash — no layer
+    }
+    ctx.fillStyle=_layerCol; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText(_layerLabel,x+U(30),panelY+U(96));
+    ctx.fillStyle=TH.color.text.primary; ctx.font=`${U(TH.font.value)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText(`${env.weather.seaState}`,x+U(64),panelY+U(96));
+
+    // Row 4: PRESSURE / TEMP (at hull depth)
+    const pressureBar = 1.01325 + (player.depth * 0.101325); // 1 atm surface + ~1 bar per 10m
+    const tempC = temperatureAtDepth(player.depth);
+    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText('PRESSURE',x,panelY+U(108));
+    ctx.fillText('TEMP',x+U(64),panelY+U(108));
+    ctx.fillStyle=TH.color.text.primary; ctx.font=`${U(TH.font.value)}px ${TH.FONT_FAMILY}`;
+    ctx.fillText(`${pressureBar.toFixed(1)} bar`,x,panelY+U(120));
+    ctx.fillText(`${tempC.toFixed(1)}\u00b0C`,x+U(64),panelY+U(120));
+
     ctx.textAlign='left';
     }
 
@@ -305,6 +360,26 @@ import { isTorpLoad } from '../../config/constants.js';
       btn('\ud83d\udccb DMG LOG',x,dmgBtnY+U(20),barW,U(17),ui.logTab==='dc',()=>{ui.logTab=ui.logTab==='dc'?'log':'dc';},dcBlink?'#7c3a00':'#1e3a5f');
       btn('\ud83d\udc65 CREW',x,dmgBtnY+U(40),barW,U(17),ui.showDamageScreen,()=>{ui.showDamageScreen=!ui.showDamageScreen;},'#1e3a5f');
     }
+    }
+
+    function drawSpdNoiseSection(x, w) {
+    ctx.fillStyle=TH.color.header; ctx.font=`${U(TH.font.header)}px ${TH.FONT_FAMILY}`; ctx.textAlign='left'; ctx.fillText('SPD',x,panelY+U(18));
+    ctx.fillStyle=TH.color.text.primary; ctx.font=`${U(TH.font.valueLg)}px ${TH.FONT_FAMILY}`;
+    const ordKts=Math.round(player.speedOrderKts??0);
+    ctx.fillText(`${Math.round(player.speed)}kt`,x,panelY+U(38));
+    ctx.fillStyle=TH.color.text.muted; ctx.font=`${U(TH.font.label)}px ${TH.FONT_FAMILY}`; ctx.fillText(`ORD ${ordKts}kt`,x+U(50),panelY+U(38));
+    const spdBtnY2=panelY+U(44); const spdBtnW2=(w-pad-U(6))/4; const spdBtnH2=U(14);
+    btn('-5',x,spdBtnY2,spdBtnW2,spdBtnH2,false,()=>PANEL.setSpeedKts(ordKts-5),'#374151');
+    btn('-1',x+spdBtnW2+U(2),spdBtnY2,spdBtnW2,spdBtnH2,false,()=>PANEL.setSpeedKts(ordKts-1),'#374151');
+    btn('+1',x+2*(spdBtnW2+U(2)),spdBtnY2,spdBtnW2,spdBtnH2,false,()=>PANEL.setSpeedKts(ordKts+1),'#1e3a5f');
+    btn('+5',x+3*(spdBtnW2+U(2)),spdBtnY2,spdBtnW2,spdBtnH2,false,()=>PANEL.setSpeedKts(ordKts+5),'#1e3a5f');
+    // Noise bar
+    const barW=w-pad*2, barH=U(11);
+    const noiseBarY=panelY+U(66); const noisePct=clamp(player.noise,0,1);
+    ctx.fillStyle='rgba(17,24,39,0.40)'; ctx.font=`${U(9)}px ui-monospace,monospace`; ctx.textAlign='left'; ctx.fillText('NOISE',x,noiseBarY-2);
+    ctx.fillStyle='rgba(17,24,39,0.10)'; ctx.fillRect(x,noiseBarY,barW,barH);
+    ctx.fillStyle=noisePct>0.5?'#dc2626':'#334155'; ctx.fillRect(x,noiseBarY,barW*noisePct,barH);
+    ctx.textAlign='left';
     }
 
     function drawPostureSection(x, w) {
@@ -508,41 +583,93 @@ import { isTorpLoad } from '../../config/constants.js';
 
     // ── Flex layout engine ──────────────────────────────────────────────────────
     const pc = { ctx, U, panelY, pad, btn, panelH };
-    const sections = [
-      { draw: drawEngineSection,    min: 130, pref: 160, max: 175 },
-      { draw: drawDepthSection,     min: 100, pref: 130, max: 145 },
-      { draw: drawTrimSection,      min: 170, pref: 215, max: 250 },
-      { draw: drawStatusSection,    min: 120, pref: 165, max: 185 },
-      { draw: drawPostureSection,   min:  95, pref: 120, max: 135 },
-      { draw: drawEmergencySection, min: 105, pref: 140, max: 155 },
-      { draw: drawWeaponsSection,   min: Math.max(125, (C.player.torpTubes||4)*22+30), pref: Math.max(155, (C.player.torpTubes||4)*22+40), max: Math.max(175, (C.player.torpTubes||4)*22+50) },
-      { draw: drawMastSection,      min: 120, pref: 150, max: 165 },
-      { draw: drawWireSection,      min: 145, pref: 185, max: 210 },
-      ...( (C.player.vlsCells||0) > 0 ? [{ draw: drawVlsSection, min: 105, pref: 135, max: 155 }] : [] ),
-      { draw: (x2, w2) => drawTdcSection(x2, w2, pc), min: 220, pref: 999, max: 999, fill: true },
+
+    // ── Tab bar ──────────────────────────────────────────────────────────────
+    const TAB_H = U(22);
+    const TAB_BUFFER = U(8); // gap between tab buttons and panel content
+    const tabBarY = panelY;
+    const tabs = [
+      { key: 'weapons',  label: 'WEAPONS' },
+      { key: 'systems',  label: 'SYSTEMS' },
+      { key: 'controls', label: 'PRIMARY CONTROL' },
     ];
+    const tabW = Math.min(U(120), (panelW - pad * 2) / tabs.length);
+    const collapseW = U(30);
 
-    const gaps = sections.length * pad + pad;
-    const widths = sections.map(s => U(s.min));
-    let used = widths.reduce((a, b) => a + b, 0) + gaps;
-    let surplus = panelW - used;
-    if (surplus > 0) {
-      const wants = sections.map((s, i) => Math.max(0, U(s.pref) - widths[i]));
-      const totalWant = wants.reduce((a, b) => a + b, 0);
-      if (totalWant > 0) { const give = Math.min(surplus, totalWant); for (let i = 0; i < sections.length; i++) { const share = Math.round(give * wants[i] / totalWant); widths[i] += share; } used = widths.reduce((a, b) => a + b, 0) + gaps; surplus = panelW - used; }
-    }
-    if (surplus > 0) {
-      const wants = sections.map((s, i) => Math.max(0, U(s.max) - widths[i]));
-      const totalWant = wants.reduce((a, b) => a + b, 0);
-      if (totalWant > 0) { const give = Math.min(surplus, totalWant); for (let i = 0; i < sections.length; i++) { const share = Math.round(give * wants[i] / totalWant); widths[i] += share; } used = widths.reduce((a, b) => a + b, 0) + gaps; surplus = panelW - used; }
-    }
-    if (surplus > 0) { const fillIdx = sections.findIndex(s => s.fill); if (fillIdx >= 0) widths[fillIdx] += surplus; }
+    // Collapse/expand toggle button (right side)
+    const colBtnX = panelW - collapseW - pad;
+    const colLabel = ui.panelCollapsed ? '\u25b2' : '\u25bc'; // ▲ / ▼
+    ctx.fillStyle = 'rgba(60,80,120,0.50)';
+    ctx.beginPath(); ctx.roundRect(colBtnX, tabBarY + U(3), collapseW, TAB_H - U(6), U(3)); ctx.fill();
+    ctx.fillStyle = 'rgba(180,200,230,0.90)'; ctx.font = `${U(10)}px ${TH.FONT_FAMILY}`; ctx.textAlign = 'center';
+    ctx.fillText(colLabel, colBtnX + collapseW / 2, tabBarY + TAB_H * 0.65);
+    PANEL.registerBtn(colBtnX, tabBarY, collapseW, TAB_H, () => { ui.panelCollapsed = !ui.panelCollapsed; });
 
-    let cx = pad;
-    for (let i = 0; i < sections.length; i++) {
-      sections[i].draw(cx, widths[i]);
-      if (i < sections.length - 1) sectionDivider(cx + widths[i]);
-      cx += widths[i] + pad;
+    // Tab buttons
+    for (let i = 0; i < tabs.length; i++) {
+      const tx = pad + i * (tabW + U(3));
+      const isActive = ui.panelTab === tabs[i].key;
+      ctx.fillStyle = isActive ? 'rgba(30,55,100,0.80)' : 'rgba(20,30,50,0.40)';
+      ctx.beginPath(); ctx.roundRect(tx, tabBarY + U(3), tabW, TAB_H - U(6), U(3)); ctx.fill();
+      if (isActive) { ctx.strokeStyle = 'rgba(80,140,220,0.60)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(tx, tabBarY + U(3), tabW, TAB_H - U(6), U(3)); ctx.stroke(); }
+      ctx.fillStyle = isActive ? 'rgba(200,220,255,0.95)' : 'rgba(180,195,215,0.85)';
+      ctx.font = `bold ${U(8)}px ${TH.FONT_FAMILY}`; ctx.textAlign = 'center';
+      ctx.fillText(tabs[i].label, tx + tabW / 2, tabBarY + TAB_H * 0.62);
+      PANEL.registerBtn(tx, tabBarY, tabW, TAB_H, () => { ui.panelTab = tabs[i].key; ui.panelCollapsed = false; });
+    }
+
+    // If collapsed, stop here — only tab bar visible
+    if (ui.panelCollapsed) return;
+
+    // Shift panelY down so section draw functions render below tabs + buffer.
+    // All sections reference panelY from closure — this moves everything down.
+    panelY = panelY + TAB_H + TAB_BUFFER;
+
+    // Helper: lay out sections at fixed preferred widths (no stretching).
+    // Sections get their pref width, capped at max. Remaining space is empty.
+    function layoutSections(sectionList) {
+      const secPad = pad;
+      const widths = sectionList.map(s => Math.min(U(s.pref), U(s.max || s.pref)));
+      let cx2 = secPad;
+      for (let i = 0; i < sectionList.length; i++) {
+        sectionList[i].draw(cx2, widths[i]);
+        if (i < sectionList.length - 1) sectionDivider(cx2 + widths[i]);
+        cx2 += widths[i] + secPad;
+      }
+    }
+
+    // Temporarily shift panelY so section draw functions render in the content area
+    // (they all reference panelY from closure)
+    // We can't easily change panelY since it's const — but the draw functions use it.
+    // Workaround: we already have panelY defined above. The sections read it.
+    // Since panelY = H - panelH and contentY = panelY + TAB_H, sections will render
+    // TAB_H pixels too high. We need the sections to account for this offset.
+    // Simplest: just let them render where panelY is — the tab bar overlaps the top
+    // of the content but since sections start at panelY + U(18) for headers, the
+    // overlap with the tab bar is actually where headers go. This is fine as-is.
+
+    if (ui.panelTab === 'weapons') {
+      layoutSections([
+        { draw: drawWeaponsSection, min: Math.max(125, (C.player.torpTubes||4)*22+30), pref: Math.max(200, (C.player.torpTubes||4)*22+60), max: 300 },
+        { draw: drawWireSection,    min: 145, pref: 185, max: 210 },
+        ...( (C.player.vlsCells||0) > 0 ? [{ draw: drawVlsSection, min: 105, pref: 135, max: 155 }] : [] ),
+        { draw: (x2, w2) => drawTdcSection(x2, w2, pc), min: 220, pref: 999, max: 999, fill: true },
+      ]);
+    } else if (ui.panelTab === 'systems') {
+      layoutSections([
+        { draw: drawTrimSection,    min: 170, pref: 215, max: 250 },
+        { draw: drawMastSection,    min: 120, pref: 150, max: 165 },
+        { draw: drawStatusSection,  min: 120, pref: 165, max: 185 },
+      ]);
+    } else if (ui.panelTab === 'controls') {
+      layoutSections([
+        { draw: drawEngineSection,       min: 130, pref: 160, max: 200 },
+        { draw: drawSpdNoiseSection,     min: 100, pref: 140, max: 180 },
+        { draw: drawDepthSection,        min: 110, pref: 140, max: 180 },
+        { draw: drawEnvironmentSection,  min: 120, pref: 145, max: 180 },
+        { draw: drawPostureSection,      min: 95,  pref: 140, max: 180 },
+        { draw: drawEmergencySection,    min: 105, pref: 160, max: 200 },
+      ]);
     }
 
     if(session.msgT>0){ ctx.fillStyle=`rgba(17,24,39,${Math.min(1,session.msgT*1.4)})`; ctx.font=`${U(11)}px ui-monospace,monospace`; ctx.textAlign='center'; ctx.fillText(session.msg,panelW/2,panelY-U(8)); }

@@ -5,11 +5,14 @@ import { rand } from '../utils/math.js';
 import { world, player, enemies } from '../state/sim-state.js';
 
 const C = CONFIG;
+// Speed values in spawn are in knots — convert to wu/s for velocity
+const KTS_TO_WU = 185.2 / 3600;
+function spdWU(knots) { return knots * KTS_TO_WU; }
 
 // ── Spawn helpers ─────────────────────────────────────────────────────────────
 export function spawnEnemy(){
   const type=(Math.random()<C.enemy.boatShare)?'boat':'sub';
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:rand(0.0,0.12),contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:rand(0.0,0.12),contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(3.0,6.0),cmCd:rand(2.2,5.5),
     navT:rand(C.enemy.subNavT[0],C.enemy.subNavT[1]),navX:0,navY:0,
@@ -26,7 +29,7 @@ export function spawnEnemy(){
   if(type==='boat'){
     const nf=0.75;
     enemies.push({...common,type,x:ex,y:ey,depth:0,hitY:0,
-      vx:Math.cos(toPlayer)*spd,vy:Math.sin(toPlayer)*spd,
+      vx:Math.cos(toPlayer)*spdWU(spd),vy:Math.sin(toPlayer)*spdWU(spd),
       r:34,hp:80,sensitivity:rand(0.70,1.05),_noiseFloor:nf,noise:nf,
       flareCd:rand(2.2,4.5),cwis:{pKillPerSec:rand(0.55,0.9),range:rand(520,760)},
       subClass:'KRIVAK'});
@@ -34,7 +37,7 @@ export function spawnEnemy(){
     const depth=rand(200,450);
     const nf=rand(0.22,0.30);
     enemies.push({...common,type,x:ex,y:ey,depth,
-      vx:Math.cos(toPlayer)*spd,vy:Math.sin(toPlayer)*spd,
+      vx:Math.cos(toPlayer)*spdWU(spd),vy:Math.sin(toPlayer)*spdWU(spd),
       r:30,hp:90,sensitivity:rand(0.55,0.90),_noiseFloor:nf,noise:nf,
       subClass:'SIERRA'});
   }
@@ -54,7 +57,7 @@ export function spawnSub(bearing, dist, role='hunter', offsetDist=0){
   const spd=role==='pinger'?rand(7,11):role==='interceptor'?rand(5,8):rand(4,6);
   const maxClassDepth = role==='pinger' ? 350 : 500;
   const depth=rand(200, maxClassDepth);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(4.0,8.0),cmCd:rand(2.2,5.5),cmStock:6,
     navT:rand(C.enemy.subNavT[0],C.enemy.subNavT[1]),
@@ -77,7 +80,7 @@ export function spawnSub(bearing, dist, role='hunter', offsetDist=0){
                  : role==='interceptor' ? 'ALFA'
                  : 'SIERRA';
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:30,hitR:90,hp:90,hpMax:90,sensitivity,
     _noiseFloor:nf, noise:nf,
     torpTubes:Array(C.enemy.subTubes).fill(0),
@@ -94,7 +97,7 @@ export function spawnSSBN(bearing, dist){
   const spd=rand(3,5);
   const depth=rand(250,400);
   const nf=rand(0.22,0.30);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(8.0,14.0),cmCd:rand(2.0,4.0),cmStock:10,
     navT:rand(200,400),
@@ -106,7 +109,7 @@ export function spawnSSBN(bearing, dist){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:48, hitR:140, hp:160, hpMax:160,
     sensitivity:rand(0.55,0.75),
     _noiseFloor:nf, noise:nf,
@@ -124,7 +127,7 @@ export function spawnZeta(bearing, dist){
   const spd=rand(6,8);
   const depth=rand(250,500);
   const nf=rand(0.12,0.18);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(4.0,7.0),cmCd:rand(1.8,3.5),cmStock:10,
     navT:rand(40,80),
@@ -144,7 +147,7 @@ export function spawnZeta(bearing, dist){
     bearingOnlyCdTime:50,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:32, hitR:95, hp:130, hpMax:130,
     sensitivity:rand(0.72,0.88),
     _noiseFloor:nf, noise:nf,
@@ -163,7 +166,7 @@ export function spawnGamma(bearing, dist, offsetDist=0){
   const spd=rand(3,5);
   const depth=rand(80,250);
   const nf=rand(0.04,0.06);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(5.0,10.0),cmCd:rand(3.0,6.0),cmStock:4,
     navT:rand(150,350),
@@ -175,7 +178,7 @@ export function spawnGamma(bearing, dist, offsetDist=0){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:24, hitR:72, hp:60, hpMax:60,
     sensitivity:rand(0.45,0.65),
     _noiseFloor:nf, noise:nf,
@@ -194,7 +197,7 @@ export function spawnEta(bearing, dist, offsetDist=0){
   const spd=rand(3,5);
   const depth=rand(100,300);
   const nf=rand(0.03,0.06);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(4.0,8.0),cmCd:rand(2.5,5.0),cmStock:6,
     navT:rand(120,280),
@@ -206,7 +209,7 @@ export function spawnEta(bearing, dist, offsetDist=0){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:26, hitR:78, hp:70, hpMax:70,
     sensitivity:rand(0.70,0.90),
     _noiseFloor:nf, noise:nf,
@@ -224,7 +227,7 @@ export function spawnEpsilon(bearing, dist){
   const spd=rand(3,5);
   const depth=rand(250,450);
   const nf=rand(0.18,0.26);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(8.0,14.0),cmCd:rand(2.0,4.0),cmStock:8,
     navT:rand(200,400),
@@ -236,7 +239,7 @@ export function spawnEpsilon(bearing, dist){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:42, hitR:120, hp:140, hpMax:140,
     sensitivity:rand(0.60,0.78),
     _noiseFloor:nf, noise:nf,
@@ -255,7 +258,7 @@ export function spawnTheta(bearing, dist, offsetDist=0){
   const spd=rand(5,8);
   const depth=rand(200,500);
   const nf=rand(0.32,0.48);
-  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null,
+  const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,suspicion:0,contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(4.0,8.0),cmCd:rand(2.0,4.0),cmStock:8,
     navT:rand(100,220),
@@ -267,7 +270,7 @@ export function spawnTheta(bearing, dist, offsetDist=0){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:44, hitR:130, hp:140, hpMax:140,
     sensitivity:rand(0.55,0.72),
     _noiseFloor:nf, noise:nf,
@@ -298,7 +301,7 @@ export function spawnNovember(bearing, dist, offsetDist=0){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:28,hitR:84,hp:70,hpMax:70,
     sensitivity:rand(0.40,0.55),
     _noiseFloor:nf,noise:nf,
@@ -329,7 +332,7 @@ export function spawnWhiskey(bearing, dist, offsetDist=0){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:20,hitR:60,hp:45,hpMax:45,
     sensitivity:rand(0.35,0.55),
     _noiseFloor:nf,noise:nf,
@@ -359,7 +362,7 @@ export function spawnYankee(bearing, dist){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:38,hitR:110,hp:120,hpMax:120,
     sensitivity:rand(0.55,0.72),
     _noiseFloor:nf,noise:nf,
@@ -389,7 +392,7 @@ export function spawnPapa(bearing, dist){
     interceptState:'waiting',interceptTargetX:null,interceptTargetY:null,
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:44,hitR:130,hp:130,hpMax:130,
     sensitivity:rand(0.55,0.70),
     _noiseFloor:nf,noise:nf,
@@ -421,7 +424,7 @@ export function spawnGolf(bearing, dist){
     _snorkelCd:rand(120,180),
   };
   enemies.push({...common,type:'sub',x:ex,y:ey,depth,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:30,hitR:90,hp:80,hpMax:80,
     sensitivity:rand(0.40,0.60),
     _noiseFloor:nf,noise:nf,
@@ -439,7 +442,7 @@ export function _spawnWarship(bearing, dist, stats, offsetDist=0){
   const patrolHeading=bearing+Math.PI+rand(-0.6,0.6);
   const spd=stats.patrolSpd||rand(10,14);
   const common={seen:0,detectedT:0,lastX:0,lastY:0,lastT:0,
-    suspicion:rand(0.0,0.08),contact:null,
+    suspicion:rand(0.0,0.08),contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
     playerBearings:[], tmaQuality:0, tmaX:null, tmaY:null,
     fireCd:rand(3.0,6.0),cmCd:rand(2.0,4.5),
     navT:rand(60,180),navX:0,navY:0,
@@ -448,7 +451,7 @@ export function _spawnWarship(bearing, dist, stats, offsetDist=0){
     evadeT:0,evadeFrom:null,evadeDecoy:null,
   };
   const ent={...common,type:'boat',x:ex,y:ey,depth:0,hitY:0,
-    vx:Math.cos(patrolHeading)*spd,vy:Math.sin(patrolHeading)*spd,
+    vx:Math.cos(patrolHeading)*spdWU(spd),vy:Math.sin(patrolHeading)*spdWU(spd),
     r:stats.r, hp:stats.hp,
     sensitivity:stats.sensitivity,
     _noiseFloor:stats.nf, noise:stats.nf,
@@ -548,13 +551,13 @@ export function spawnCivilian(civType){
   enemies.push({
     type:'boat', civilian:true, civType,
     x:ex, y:ey, depth:0, hitY:0,
-    vx:Math.cos(heading)*stats.spd, vy:Math.sin(heading)*stats.spd,
+    vx:Math.cos(heading)*spdWU(stats.spd), vy:Math.sin(heading)*spdWU(stats.spd),
     r:stats.r, hp:stats.hp,
     heading, patrolHeading:heading,
     _noiseFloor:stats.nf, noise:stats.nf,
     navT:rand(120,400),
     sensitivity:0,
     seen:0, detectedT:0, lastX:0, lastY:0, lastT:0,
-    suspicion:0, contact:null,
+    suspicion:0, contact:null, contactState:'NONE', contactStateT:0, firstDetectionT:0,
   });
 }

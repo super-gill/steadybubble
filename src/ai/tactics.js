@@ -4,7 +4,8 @@ import { CONFIG } from '../config/constants.js';
 import { rand, clamp, now } from '../utils/math.js';
 import { world, player, enemies } from '../state/sim-state.js';
 import { addLog } from '../state/session-state.js';
-import { wrapDx, enemyUpdateContactFromPing } from './perception.js';
+import { wrapDx, enemyUpdateContactFromPing, promoteContactState } from './perception.js';
+import { env } from '../systems/ocean-environment.js';
 
 // ── Lazy binding for circular deps ──────────────────────────────────────
 let _COMMS = null;
@@ -22,6 +23,7 @@ export function wolfpackShareDatum(src, datumX, datumY, quality){
     if(d>range) continue;
     const sig=clamp(1-d/range,0.1,0.6)*quality;
     e.suspicion=Math.min(e.suspicion+0.12*sig, Math.max(e.suspicion, 0.45));
+    promoteContactState(e, 'DETECTION'); // shared datum = at least a detection
     const blur=clamp(500*(1-sig)+250, 300, 900);
     const sharedX=datumX+rand(-blur,blur);
     const sharedY=datumY+rand(-blur,blur);
@@ -41,7 +43,7 @@ export function shipActiveSonar(e, dt){
     if(e._huntT<=0){ e._huntState=false; e._huntDatum=null; e._sectorBearing=null; }
   }
 
-  if(!e._huntState && e.suspicion<asw.activePingThreshold) return;
+  if(!e._huntState && e.contactState==='NONE') return;
 
   e._pingCd=(e._pingCd||0)-dt;
   if(e._pingCd>0) return;
@@ -55,7 +57,8 @@ export function shipActiveSonar(e, dt){
   const dy=player.wy-e.y;
   const d=Math.hypot(dx,dy);
 
-  const playerBelowLayer=player.depth>(world.layerY2+40);
+  const layerDepth = env.svp.mixedLayerDepth || world.layerY2 || 280;
+  const playerBelowLayer=player.depth>(layerDepth+40);
   const hullCanDetect=!playerBelowLayer;
   const vdsCanDetect=!!e.vdsDepth;
 
@@ -105,6 +108,7 @@ export function triggerHuntState(killedShip){
     e._huntT=asw.huntTimeout;
     e._huntDatum=datum;
     e.suspicion=Math.max(e.suspicion, asw.huntSuspicionFloor);
+    promoteContactState(e, 'CLASSIFIED'); // hunt state = we know something hostile is out there
     e._pingCd=0;
     e._atDatum=false;
     e._datumHoldT=0;
@@ -124,5 +128,6 @@ export function shipShareContact(fromShip, cx, cy, accuracy){
     e.contact={x:cx+rand(-noiseR,noiseR), y:cy+rand(-noiseR,noiseR),
                u:noiseR, t:_now, strength:0.40, shared:true};
     e.suspicion=Math.min(1,Math.max(e.suspicion,0.45));
+    promoteContactState(e, 'DETECTION'); // shared contact = at least a detection
   }
 }

@@ -3,6 +3,7 @@
 
 import { lerp } from '../utils/math.js';
 import { world, cam, player } from '../state/sim-state.js';
+import { activeLocation } from '../systems/ocean.js';
 
 // ── Lazy bindings ────────────────────────────────────────────────────────
 let _ctx = null;
@@ -24,32 +25,64 @@ export function _bindRenderWorld(deps) {
 // ── Land rendering ───────────────────────────────────────────────────────────
 function drawLand(){
   const ctx = _ctx;
-  const map = _MAPS.getMap();
+  const map = _MAPS?.getMap();
   const Z = cam.zoom * _DPR;
-  const cx = _canvas.width / 2, cy = _canvas.height / 2;
+  // Use same center point as w2s() — offset for depth strip and panel
+  const stripW = _R?.STRIP_W || 0;
+  const panelH = _R?.PANEL_H || 0;
+  const cx = (_canvas.width - stripW) / 2;
+  const cy = (_canvas.height - panelH) / 2;
+  const W = _canvas.width, H = _canvas.height;
 
-  function toScreen(wx,wy){
-    let dx=wx-cam.x; if(dx>world.w/2)dx-=world.w; if(dx<-world.w/2)dx+=world.w;
-    let dy=wy-cam.y; if(dy>world.h/2)dy-=world.h; if(dy<-world.h/2)dy+=world.h;
-    return [cx+dx*Z, cy+dy*Z];
+  // Grid-based land rendering from location bathymetry data
+  const loc = activeLocation();
+  if(loc?.land?.mask && loc?.bathymetry){
+    const mask = loc.land.mask;
+    const res = loc.bathymetry.resolution || 185.2;
+    const rows = loc.bathymetry.rows;
+    const cols = loc.bathymetry.cols;
+    const cellPx = res * Z;
+
+    // Only render cells visible on screen (culling)
+    const viewLeft = cam.x - W / (2 * Z);
+    const viewRight = cam.x + W / (2 * Z);
+    const viewTop = cam.y - H / (2 * Z);
+    const viewBot = cam.y + H / (2 * Z);
+
+    const c0 = Math.max(0, Math.floor(viewLeft / res) - 1);
+    const c1 = Math.min(cols - 1, Math.ceil(viewRight / res) + 1);
+    const r0 = Math.max(0, Math.floor(viewTop / res) - 1);
+    const r1 = Math.min(rows - 1, Math.ceil(viewBot / res) + 1);
+
+    ctx.fillStyle = 'rgba(90,80,60,0.85)';
+    for(let r = r0; r <= r1; r++){
+      for(let c = c0; c <= c1; c++){
+        if(!mask[r]?.[c]) continue;
+        const wx = c * res;
+        const wy = r * res;
+        const sx = cx + (wx - cam.x) * Z;
+        const sy = cy + (wy - cam.y) * Z;
+        ctx.fillRect(sx, sy, cellPx + 1, cellPx + 1);
+      }
+    }
   }
 
-  for(const poly of map.land){
-    ctx.fillStyle='#c8b89a';
-    ctx.beginPath();
-    for(let i=0;i<poly.length;i++){
-      const [sx,sy]=toScreen(poly[i].x,poly[i].y);
-      if(i===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+  // Legacy polygon-based land (from map data)
+  if(map?.land?.length){
+    function toScreen(wx,wy){
+      let dx=wx-cam.x; if(dx>world.w/2)dx-=world.w; if(dx<-world.w/2)dx+=world.w;
+      let dy=wy-cam.y; if(dy>world.h/2)dy-=world.h; if(dy<-world.h/2)dy+=world.h;
+      return [cx+dx*Z, cy+dy*Z];
     }
-    ctx.closePath(); ctx.fill();
-    ctx.strokeStyle='rgba(17,24,39,0.25)';
-    ctx.lineWidth=2;
-    ctx.beginPath();
-    for(let i=0;i<poly.length;i++){
-      const [sx,sy]=toScreen(poly[i].x,poly[i].y);
-      if(i===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+    for(const poly of map.land){
+      ctx.fillStyle='#c8b89a';
+      ctx.beginPath();
+      for(let i=0;i<poly.length;i++){
+        const [sx,sy]=toScreen(poly[i].x,poly[i].y);
+        if(i===0) ctx.moveTo(sx,sy); else ctx.lineTo(sx,sy);
+      }
+      ctx.closePath(); ctx.fill();
     }
-    ctx.closePath(); ctx.stroke();
   }
 }
 

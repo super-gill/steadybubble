@@ -584,5 +584,15 @@ Per-room flood detection comms added. When any room crosses 3% flood, bilge alar
 | `src/dev-panel.js` | Per-room flood buttons, flood clear includes room data, emergency state on flood |
 | `docs/vessel-individuality/DECISIONS.md` | D019 logged |
 
+### Additional fixes (continued testing)
+
+**Flood spread — gravity drain as transfer:** Water now transfers (leaves source, enters target) instead of copying. Upper rooms drain into lower rooms, only staying flooded when rooms below are full. Conservation of mass.
+
+**Battery room visible on DC panel:** Added `fwd_battery` visual block to COMP_LAYOUT for all nuclear boats. Added `DECK_HEIGHTS` exports (688: `[1,1,1,0.4]`, Seawolf: `[1,1,1,1,0.4]`) for thin battery strip. `numDecks` now computed from max room deck index.
+
+**Emergency stations wouldn't clear:** `_checkClearEmergency` checked `d.flooding[comp] > 0.001` (section aggregate with residual water). Changed to check for active room breaches (`roomFloodRate > 0`). Emergency clears when all breaches sealed, not when all water drained.
+
+**Tube load options showed unavailable weapons:** Two bugs — (1) `missileStock` was unconditionally overwritten after loadout was applied (line 308 in sim/index.js). (2) UI checked total `mStock`, not per-type. Fixed: added `player.rackStock` (per-weapon-type count), all load/unload/swap operations update it, UI only shows weapons with stock in rack.
+
 ### Build status
 Clean build (Vite production). No errors.

@@ -30,10 +30,10 @@ V1 (subgame2) is the behavioral ground truth. V2 (Steady Bubble) must be functio
 
 ## Your Standing Instructions
 
-1. **Read `docs/vessel-individuality/SESSION-LOG.md` at the start of every session** before doing anything. It tells you what has been done and what's next.
-2. **Read `docs/vessel-individuality/DESIGN.md` for the upgrade design** — implementation patterns, phase structure, open questions.
-3. **Update `docs/vessel-individuality/SESSION-LOG.md` at the end of every session.** Record what was done, problems encountered, and how they were solved. This is non-negotiable — it is how continuity is maintained across your memory loss between sessions.
-4. **Log decisions in `docs/vessel-individuality/DECISIONS.md`.** Any technical decision that could be argued either way, or that future-you might question, gets recorded there with rationale.
+1. **Read the active project's `SESSION-LOG.md` at the start of every session** before doing anything. It tells you what has been done and what's next. Currently: `docs/realism-overhaul/SESSION-LOG.md`.
+2. **Read the active project's `DESIGN.md` for the design** — implementation patterns, phase structure, open questions. Currently: `docs/realism-overhaul/DESIGN.md`.
+3. **Update the active project's `SESSION-LOG.md` at the end of every session.** Record what was done, problems encountered, and how they were solved. This is non-negotiable — it is how continuity is maintained across your memory loss between sessions.
+4. **Log decisions in the active project's `DECISIONS.md`.** Any technical decision that could be argued either way, or that future-you might question, gets recorded there with rationale.
 5. **Do not start a phase until the previous phase is confirmed working by Jason.** Playtesting and sign-off between phases is Jason's responsibility.
 6. **Do not modify subgame2 (V1).** It is the reference, not the working copy.
 7. **Read `manual.md` (the constitution)** when working on gameplay mechanics. It is the authoritative reference for all game systems.
@@ -75,11 +75,14 @@ V1 (subgame2) is the behavioral ground truth. V2 (Steady Bubble) must be functio
 | V1 reference | `super-gill.github.io/my-projects/subgame2/` (DO NOT MODIFY) |
 | Source | `steadybubble/src/` |
 | Constitution | `steadybubble/manual.md` |
-| **Active project docs** | `steadybubble/docs/vessel-individuality/` |
+| **Active project docs** | `steadybubble/docs/realism-overhaul/` |
+| — Design doc | `docs/realism-overhaul/DESIGN.md` |
+| — Session log | `docs/realism-overhaul/SESSION-LOG.md` |
+| — Decisions | `docs/realism-overhaul/DECISIONS.md` |
+| **Completed project** | `steadybubble/docs/vessel-individuality/` |
 | — Design doc | `docs/vessel-individuality/DESIGN.md` |
 | — Session log | `docs/vessel-individuality/SESSION-LOG.md` |
-| — Decisions (D008+) | `docs/vessel-individuality/DECISIONS.md` |
-| — Layout template | `docs/vessel-individuality/LAYOUT-TEMPLATE.md` |
+| — Decisions (D008-D019) | `docs/vessel-individuality/DECISIONS.md` |
 | **Planned project** | `steadybubble/docs/weapons-expansion/` |
 | — Design doc | `docs/weapons-expansion/DESIGN.md` |
 | **Archived project** | `steadybubble/docs/migration/` |

@@ -6,7 +6,7 @@ import { cam, player } from '../state/sim-state.js';
 import { session } from '../state/session-state.js';
 import { ui } from '../state/ui-state.js';
 import { getScale, setScale, SCALE_STEP } from './ui-scale.js';
-import { getCanvas, getDPR, getPanelH, getStripW, U } from '../render/render-utils.js';
+import { getCanvas, getDPR, getPanelH, getStripW, U, s2w } from '../render/render-utils.js';
 
 // Forward references — bound after panel.js loads
 let _handlePanelClick = null;
@@ -176,6 +176,21 @@ addEventListener("wheel", (e) => {
 }, { passive: false });
 
 addEventListener("contextmenu", (e) => e.preventDefault());
+
+// ── Dev teleport: double-click to move player (only when dev panel is open) ──
+addEventListener("dblclick", (e) => {
+  const devPanel = document.getElementById('dev-panel');
+  if (!devPanel || devPanel.style.display === 'none') return;
+  if (e.target.closest('#dev-panel')) return;
+  if (!session.started) return;
+  updateMouse(e);
+  const dpr = getDPR() || 1;
+  const [wx, wy] = s2w(input.mouseX * dpr, input.mouseY * dpr);
+  if (wx >= 0 && wy >= 0) {
+    player.wx = wx;
+    player.wy = wy;
+  }
+});
 
 addEventListener("blur", () => {
   input.keys.clear();

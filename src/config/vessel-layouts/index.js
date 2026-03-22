@@ -12,6 +12,7 @@ import * as layoutTrafalgar from './layout-trafalgar.js';
 import * as layoutSeawolf from './layout-seawolf.js';
 import * as layoutType209 from './layout-type209.js';
 import * as layoutLegacy from './layout-legacy.js';
+import * as layoutDev from './layout-dev.js';
 
 const LAYOUTS = {
   '688':       layout688,
@@ -20,6 +21,7 @@ const LAYOUTS = {
   'swiftsure': layoutTrafalgar,
   'seawolf':   layoutSeawolf,
   'type209':   layoutType209,
+  'dev_sub':   layoutDev,
 };
 
 /**

@@ -21,6 +21,10 @@ export const ui = {
   // ── Damage screen selected watchspace ──────────────────────────────────────
   selectedWatchspace: null,  // room ID (e.g. 'fwd_control') or null
 
+  // ── Command panel tabs ────────────────────────────────────────────────────
+  panelTab: 'weapons',       // 'weapons' | 'systems' | 'controls'
+  panelCollapsed: false,     // true = collapsed to tab bar only
+
   // ── Weapons proposal (pending fire solution) ───────────────────────────────
   wepsProposal: null,
 };
