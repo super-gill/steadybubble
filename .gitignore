@@ -1,0 +1,6 @@
+# Vite is a dev-only dependency; the game runs as static ES modules.
+node_modules/
+.vite/
+*.log
+.DS_Store
+Thumbs.db
